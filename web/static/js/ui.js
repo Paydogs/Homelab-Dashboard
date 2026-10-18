@@ -1,39 +1,111 @@
-// Homelab dashboard UI: clock, search, tag filtering, style picker,
-// launch confirmations, toasts.
+// Homelab dashboard UI: group selection (left column + drill-down tiles),
+// search/tag filtering, clock, style picker, editor modals, run items, toasts.
 // Plain JS — no framework beyond the vendored Alpine.js for the confirm menus.
 
 (function () {
   "use strict";
 
+  /* ---- group selection: sidebar (root groups) + tiles (drill-down) ---- */
+
+  var GROUP_KEY = "dashboard.group";
+  var sidebar = document.querySelector(".groups");
+  var panels = document.querySelectorAll(".group-panel");
+
+  function panelFor(path) {
+    for (var i = 0; i < panels.length; i++) {
+      if (panels[i].dataset.path === path) return panels[i];
+    }
+    return null;
+  }
+
+  function selectedGroup() {
+    // priority: URL hash (restores refreshes + shareable links) →
+    // remembered pick → the server-rendered default
+    var fromHash = null;
+    try { fromHash = decodeURIComponent((location.hash.match(/group=([^&]+)/) || [])[1] || ""); } catch (e) { /* */ }
+    if (fromHash && panelFor(fromHash)) return fromHash;
+    var saved = null;
+    try { saved = localStorage.getItem(GROUP_KEY); } catch (e) { /* */ }
+    if (saved && panelFor(saved)) return saved;
+    var first = document.querySelector(".group-panel.selected");
+    return first ? first.dataset.path : (panels[0] ? panels[0].dataset.path : null);
+  }
+
+  function applySelection(path) {
+    document.querySelectorAll(".group-panel").forEach(function (p) {
+      p.hidden = p.dataset.path !== path;
+    });
+    document.querySelectorAll(".group-item, .tile").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.path === path);
+    });
+    // the sidebar highlights the ROOT of the selection
+    document.querySelectorAll(".group-item").forEach(function (b) {
+      var root = (path.split("/"))[0];
+      b.classList.toggle("active", b.dataset.path === root);
+    });
+    try { localStorage.setItem(GROUP_KEY, path); } catch (e) { /* */ }
+    try { history.replaceState(null, "", "#group=" + encodeURIComponent(path)); } catch (e) { /* */ }
+    applyFilters();
+  }
+
+  document.addEventListener("click", function (e) {
+    var el = e.target.closest(".group-item, .tile");
+    if (!el || !el.dataset.path) return;
+    applySelection(el.dataset.path);
+  });
+
+  // keep the selection across sidebar fragment refreshes
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.detail && e.detail.target && e.detail.target.id === "groups-nav") {
+      var sel = selectedGroup();
+      document.querySelectorAll(".group-item").forEach(function (b) {
+        var root = sel ? sel.split("/")[0] : null;
+        b.classList.toggle("active", b.dataset.path === root);
+      });
+    }
+  });
+
+  /* ---- search + tag filtering (across every panel) ---- */
+
   var searchInput = document.getElementById("search");
   var activeTags = new Set();
   var query = "";
 
-  /* ---- search + tag filtering (over all panels) ---- */
+  function searchActive() { return query !== "" || activeTags.size > 0; }
 
-  function cardMatches(card) {
-    if (query && (card.dataset.text || "").indexOf(query) === -1) return false;
+  function rowMatches(row) {
+    if (query && (row.dataset.text || "").indexOf(query) === -1) return false;
     if (activeTags.size) {
-      var tags = (card.dataset.tags || "").split(/\s+/).filter(Boolean);
+      var tags = (row.dataset.tags || "").split(/\s+/).filter(Boolean);
       for (var t of activeTags) if (tags.indexOf(t) === -1) return false;
     }
     return true;
   }
 
   function applyFilters() {
-    document.querySelectorAll(".group-panel").forEach(function (panel) {
-      var matches = 0;
-      panel.querySelectorAll(".row").forEach(function (row) {
-        var show = cardMatches(row);
-        row.classList.toggle("hidden", !show);
-        if (show) matches++;
+    if (searchActive()) {
+      // searching covers the whole tree: reveal every panel that has
+      // matches (tiles are meaningless while drilling is off)
+      document.querySelectorAll(".group-panel").forEach(function (panel) {
+        var matches = 0;
+        panel.querySelectorAll(".row").forEach(function (row) {
+          var show = rowMatches(row);
+          row.classList.toggle("hidden", !show);
+          if (show) matches++;
+        });
+        panel.hidden = matches === 0;
+        var tiles = panel.querySelector(".tiles");
+        if (tiles) tiles.classList.add("hidden");
       });
-      // an unfiltered page shows every panel; a search hides the empty ones
-      panel.classList.toggle("hidden", searchActive() && matches === 0);
-    });
+    } else {
+      document.querySelectorAll(".group-panel").forEach(function (panel) {
+        panel.hidden = panel.dataset.path !== selectedGroup();
+        panel.querySelectorAll(".row.hidden").forEach(function (r) { r.classList.remove("hidden"); });
+        var tiles = panel.querySelector(".tiles");
+        if (tiles) tiles.classList.remove("hidden");
+      });
+    }
   }
-
-  function searchActive() { return query !== "" || activeTags.size > 0; }
 
   if (searchInput) {
     searchInput.addEventListener("input", function () {
@@ -49,7 +121,6 @@
       if (!btn) return;
       var tag = btn.dataset.tag;
       if (!tag) {
-        // "all" resets the selection
         activeTags.clear();
         tagBar.querySelectorAll(".tag").forEach(function (b) {
           b.classList.toggle("active", !b.dataset.tag);
@@ -63,7 +134,7 @@
     });
   }
 
-  /* ---- header clock: big HH:MM, small seconds, full date ---- */
+  /* ---- header clock: big HH:MM, small seconds, date line ---- */
 
   var pad2 = function (n) { return (n < 10 ? "0" : "") + n; };
 
@@ -81,11 +152,8 @@
   tick();
   setInterval(tick, 1000);
 
-  /* ---- style picker (themes served from resources/styles, persisted per browser) ---- */
+  /* ---- style picker (themes from resources/styles, persisted per browser) ---- */
 
-  // The stored record keeps the style AND the config default it was chosen
-  // under: when the config's defaultStyle changes, browsers adopt the new
-  // default on their next refresh instead of staying on an old pick.
   var STYLE_KEY = "dashboard.style";
   var select = document.getElementById("style-select");
   if (select) {
@@ -137,7 +205,7 @@
   var overTextarea = document.getElementById("edit-overwrite");
   var saveBtn = document.getElementById("edit-save");
   var editError = document.getElementById("edit-error");
-  var editing = null; // {saveUrl, body}
+  var editing = null; // {split, saveUrl}
 
   function openEditor(title, single, loadBody) {
     editTitle.textContent = title;
@@ -167,8 +235,8 @@
 
     document.getElementById("edit-style-btn").addEventListener("click", function () {
       var styleId = document.getElementById("style-select").value || "retro";
-      var styleName = document.getElementById("style-select").selectedOptions[0] ?
-        document.getElementById("style-select").selectedOptions[0].textContent : styleId;
+      var selected = document.getElementById("style-select").selectedOptions[0];
+      var styleName = selected ? selected.textContent : styleId;
       editing = { split: true, saveUrl: "/style-source/" + encodeURIComponent(styleId) + "/overwrite" };
       openEditor("Edit style: " + styleName + "  (" + styleId + ")", false, function () {
         baseTextarea.value = "loading…";
@@ -241,5 +309,19 @@
       el.classList.add("fade");
       setTimeout(function () { el.remove(); }, 500);
     }, 2500);
+  }
+
+  /* ---- initial state ---- */
+
+  // apply the resolved selection once everything above is in place
+  selectGroupInit();
+  function selectGroupInit() {
+    var sel = selectedGroup();
+    if (sel) {
+      document.querySelectorAll(".group-panel").forEach(function (p) {
+        p.hidden = p.dataset.path !== sel;
+      });
+      applySelection(sel);
+    }
   }
 })();

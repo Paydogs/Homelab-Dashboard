@@ -50,11 +50,11 @@ func TestParseValid(t *testing.T) {
 	if cfg.Title != "Test" {
 		t.Errorf("title = %q, want Test", cfg.Title)
 	}
-	if len(cfg.Groups) != 1 || len(cfg.Groups[0].Children) != 2 {
+	if len(cfg.Groups) != 1 || len(cfg.Groups[0].Items) != 2 {
 		t.Fatalf("expected 1 group with 2 children, got %+v", cfg.Groups)
 	}
 	var svc, app domain.Child
-	for _, ch := range cfg.Groups[0].Children {
+	for _, ch := range cfg.Groups[0].Items {
 		if _, isApp := ch.(*domain.App); isApp {
 			app = ch
 		} else {
@@ -62,7 +62,7 @@ func TestParseValid(t *testing.T) {
 		}
 	}
 	if svc == nil || app == nil {
-		t.Fatalf("expected a Service and an App child, got %+v", cfg.Groups[0].Children)
+		t.Fatalf("expected a Service and an App child, got %+v", cfg.Groups[0].Items)
 	}
 
 	if cfg.DefaultStyle != "" {
@@ -195,5 +195,98 @@ func TestIconFilename(t *testing.T) {
 	}
 	if name != iconFilename("https://example.org/icons/logo.png?v=2") {
 		t.Error("iconFilename must be deterministic for the same URL")
+	}
+}
+
+// the self-explanatory syntax: blocks declare what they are on their start
+// line — group:/service:/app: — with title:/items: still valid aliases.
+func TestSelfExplanatorySyntax(t *testing.T) {
+	new := `
+title: T
+groups:
+  - group: Favourites
+    subtitle: quick access
+    children:
+      - service: Jellyfin
+        url: http://192.168.1.20:8096
+        tags: [media]
+        health: {path: /health, interval: 30s}
+      - app: Steam
+        run: C:\Games\steam.exe
+        tags: [games]
+`
+	mgr, err := NewManager(write(t, new), testLogger(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg := mgr.Get()
+	if cfg.Groups[0].Title != "Favourites" {
+		t.Errorf("group name = %q, want Favourites", cfg.Groups[0].Title)
+	}
+	app, ok := mgr.RunService("Favourites/Steam")
+	if !ok {
+		t.Fatal("Steam (app: child) should resolve as runnable")
+	}
+	if app.Core().Title != "Steam" {
+		t.Errorf("app title = %q", app.Core().Title)
+	}
+}
+
+func TestSelfExplanatoryConflictsRejected(t *testing.T) {
+	cases := map[string]string{
+		"group+title mixed": `
+title: T
+groups:
+  - group: A
+    title: A2
+`,
+		"children+items mixed": `
+title: T
+groups:
+  - title: A
+    children:
+      - service: X
+        url: http://x
+    items:
+      - app: Y
+        run: y.exe
+`,
+		"service+app mixed": `
+title: T
+groups:
+  - group: A
+    children:
+      - service: X
+        app: X2
+        url: http://x
+`,
+		"service with run": `
+title: T
+groups:
+  - group: A
+    children:
+      - service: X
+        run: x.exe
+`,
+		"app with url": `
+title: T
+groups:
+  - group: A
+    children:
+      - app: X
+        url: http://x
+`,
+		"app without run": `
+title: T
+groups:
+  - group: A
+    children:
+      - app: X
+`,
+	}
+	for name, bad := range cases {
+		if _, err := NewManager(write(t, bad), testLogger(t)); err == nil {
+			t.Errorf("%s: expected an error, got none", name)
+		}
 	}
 }

@@ -1,0 +1,11 @@
+<nav id="groups-nav" class="groups" hx-get="/groups" hx-trigger="every 15s" hx-swap="outerHTML" aria-label="groups">
+  {{range .}}
+  <button class="group-item {{if .Selected}}active{{end}}" data-path="{{.Path}}" type="button">
+    <span class="group-item-name">{{.Name}} <span class="group-item-total">· {{.Total}}</span></span>
+    <span class="group-item-counts">
+      {{if .OK}}<span class="count ok">{{.OK}} ok</span>{{end}}
+      {{if .Error}}<span class="count err">{{.Error}} err</span>{{end}}
+    </span>
+  </button>
+  {{end}}
+</nav>

@@ -37,15 +37,8 @@ func (m *Manager) ensureIcons(cfg *domain.Config) {
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	cfg.Walk(func(path string, g *domain.Group) {
-		if isURL(g.Icon) {
-			dest := filepath.Join(iconsDir, iconFilename(g.Icon))
-			if _, err := os.Stat(dest); err != nil {
-				if err := downloadIcon(client, g.Icon, dest); err != nil {
-					m.logger.Printf("downloading icon %s for group %q: %v", g.Icon, g.Title, err)
-				}
-			}
-		}
-		for _, ch := range g.Children {
+		// groups are structural — no icon/host; only children carry icons
+		for _, ch := range g.Items {
 			icon := ch.Core().Icon
 			if !isURL(icon) {
 				continue

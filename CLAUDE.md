@@ -36,12 +36,18 @@ opens them fast, and monitors their health. Technical direction follows projects
   are an htmx fragment (`GET /summary`, refreshed on a timer).
 - **Filter row:** search box (matches **name, tags, url/ip**) + tag chips (`all` + every distinct
   tag). Search/tag filtering covers all panels at once; empty panels hide while filtering.
-- **Panel grid:** one panel per group (2-col responsive grid). Panel header: group icon box,
-  name, optional host line, big `up/total` fraction, and a `HOST ONLINE / HOST DEGRADED` label
-  (DEGRADED when any service answers slower than its threshold).
-- **Service rows** inside each panel: icon, name (link) + url line, tag chips; right side: health
-  status block (dot + ONLINE/DEGRADED/OFFLINE label + latency, self-refreshing htmx fragment,
-  `GET /health-status/{key}`) or the `run…` confirm button for local executables.
+- **Layout: single left column + panel.** The left column lists the (root) groups with live
+  subtree counts (`n ok / m err` chips + total); the first is selected by default and the last
+  selection is remembered per browser (also in the URL hash, so refresh/links restore it).
+  Selecting a group draws its contents in the panel next to it: sub-group **tiles** (clickable —
+  they drill into nested groups) and its direct child **rows**. A breadcrumb in the panel header
+  navigates back up the tree.
+- **Panels/rows inside:** panel header: group icon, breadcrumb, host line, big `up/total`
+  subtree fraction and the `HOST ONLINE / HOST DEGRADED` label (DEGRADED when a direct child
+  answers slower than its threshold). Service rows: icon, name (link) + url line, tag chips;
+  right side: health status block (dot + ONLINE/DEGRADED/OFFLINE + latency, self-refreshing
+  htmx fragment) or the `run…` confirm button. Search matches every leaf of the whole tree
+  (name/tags/url) and reveals matches across all panels; tag chips filter the same way.
 - **Styles (themes) are files, never code:** the only source of styles is `<config-dir>/resources/
   styles/` — **one subfolder per style**, holding `style.yml` plus any files it references.
   `style.yml` has `name`, optional `font:` / `titleFont:` (paths relative to the style folder —
@@ -124,34 +130,40 @@ new UI as small component templates rather than monolithic page markup.
 
 ## Config (sketch)
 
-Single YAML file, path given by flag/env (default `config.yml`). Structure roughly:
+Single YAML file at the data dir's root (`config.yml`). **Every block's start line says what it
+is** — groups introduce themselves with `group:`, children with `service:`/`app:`; the plain
+`title:`/`items:` keys remain valid aliases:
 
 ```yaml
 title: Homelab
-groups:                          # a recursive tree of panels
-  - title: Servers               # group: title, optional subtitle/icon/host
-    groups:
-      - title: Server 1
-        host: 192.168.1.30       # optional; shown in the panel header
-        items:
-          - title: Gitea         # a Service (leaf): a link opened in the browser
-            url: http://192.168.1.30:3000
-            icon: …              # optional; URL icons download once to resources/icons/
-            tags: [dev]          # shown on the row, filter/search over tags, url, name
-            health:              # optional; omit = no healthcheck
-              path: /            # omitted path = probe the root
-              interval: 60s      # default 60s
-              degraded_after: 250ms  # slower answers show DEGRADED instead of ONLINE
-          - title: Steam         # an App (leaf): launched on the dashboard host
-            run: C:\Program Files (x86)\Steam\steam.exe
+defaultStyle: modern     # a resources/styles folder name (first folder as fallback)
+editable: true           # simple switch: editing allowed wherever it's browsed;
+                         # explicit editAccess: local|lan|any wins when set
+groups:                  # a recursive tree
+  - group: Favourites    # ← a parent: name on its start line
+    subtitle: quick access
+    children:
+      - service: Gitea   # ← a leaf: a link opened in the browser
+        url: http://192.168.1.30:3000
+        icon: …          # optional; URL icons download once to resources/icons/
+        tags: [dev]      # shown on the row, filter/search over tags, url, name
+        health:          # optional; omit = no healthcheck
+          path: /            # omitted path = probe the root
+          interval: 60s      # default 60s
+          degraded_after: 250ms  # slower answers show DEGRADED instead of ONLINE
+      - app: Steam       # ← a leaf: launched on the dashboard host
+        run: C:\Program Files (x86)\Steam\steam.exe
 ```
 
-Leaf kinds (validated: exactly one of `url`/`run`; no healthchecks on run items):
+Rules enforced (validation errors name the offending line):
 
-- **Service** — plain link, opened in a new tab. Cover remote services on other VMs.
-- **App** — the server launches a locally installed executable (Windows path). It does not
-  need to run instantly: clicking shows a **confirm step** ("Run Steam?") before the server
-  spawns the process. Only meaningful when the dashboard runs on that machine; refused elsewhere.
+- exactly one of `url:` (service) / `run:` (app) per child — `service:` with `run:`, `app:` with
+  `url:`, a healthcheck on an `app:`, `group:`+`title:` or `children:`+`items:` in one block are
+  all errors.
+- **Service** — a link opened in a new tab (remote services on other VMs).
+- **App** — the server launches a locally installed executable (Windows path); a confirm step
+  ("Run Steam?") precedes spawning. Only meaningful when the dashboard runs on that machine;
+  refused elsewhere.
 
 Keep the schema minimal and validated at startup — **fail fast with a useful error** (file + line)
 on bad config.

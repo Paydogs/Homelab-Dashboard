@@ -67,6 +67,7 @@ func New(cfg *config.Manager, eng *health.Engine, styleMgr *styles.Manager, logg
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /groups", s.groups)
 	mux.HandleFunc("GET /summary", s.summary)
 	mux.HandleFunc("GET /config-source", s.configSource)
 	mux.HandleFunc("POST /config-source", s.saveConfig)

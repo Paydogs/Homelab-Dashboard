@@ -179,10 +179,10 @@ func validate(c *domain.Config) error {
 		if prefix != "" {
 			path = prefix + "/" + g.Title
 		}
-		if len(g.Children) == 0 && len(g.Groups) == 0 {
+		if len(g.Items) == 0 && len(g.Groups) == 0 {
 			return fmt.Errorf("group %q has no items or sub-groups", g.Title)
 		}
-		for _, ch := range g.Children {
+		for _, ch := range g.Items {
 			key := domain.ChildPath(path, ch.Core().Title)
 			if ch.Core().Title == "" {
 				return fmt.Errorf("every item in group %q needs a title", g.Title)

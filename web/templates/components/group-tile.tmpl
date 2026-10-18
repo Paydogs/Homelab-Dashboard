@@ -1,0 +1,8 @@
+<button class="tile" data-path="{{.Path}}" type="button">
+  <span class="tile-name">{{.Name}}</span>
+  <span class="tile-total">· {{.Total}}</span>
+  <span class="tile-counts">
+    {{if .OK}}<span class="count ok">{{.OK}} ok</span>{{end}}
+    {{if .Error}}<span class="count err">{{.Error}} err</span>{{end}}
+  </span>
+</button>

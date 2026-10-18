@@ -63,14 +63,52 @@ func IsRunnable(c Child) bool {
 	return ok
 }
 
-// Group is a parent node: a titled panel holding sub-groups and children.
+// Group is a parent node: a titled container holding sub-groups and
+// children. Groups are purely structural — a name, an optional subtitle,
+// and the child/group lists; nothing else. In YAML the start line carries
+// the name (`- group: Favourites`), so what a block is stays visible at a
+// glance; `- title:` still works as an alias.
 type Group struct {
-	Title    string    `yaml:"title"`
+	Title    string    `yaml:"-"`
 	Subtitle string    `yaml:"subtitle,omitempty"`
-	Icon     string    `yaml:"icon,omitempty"`
-	Host     string    `yaml:"host,omitempty"`
 	Groups   []Group   `yaml:"groups,omitempty"`
-	Children ChildList `yaml:"items,omitempty"`
+	Items    ChildList `yaml:"children,omitempty"`
+}
+
+// UnmarshalYAML accepts the self-explaining keys (group:, children:) and
+// the plain ones (title:, items:) — mixing the pair in one block is an
+// error.
+func (g *Group) UnmarshalYAML(value *yaml.Node) error {
+	var probe struct {
+		Group    string    `yaml:"group"`
+		Title    string    `yaml:"title"`
+		Subtitle string    `yaml:"subtitle,omitempty"`
+		Groups   []Group   `yaml:"groups,omitempty"`
+		Children ChildList `yaml:"children,omitempty"`
+		Items    ChildList `yaml:"items,omitempty"`
+	}
+	if err := decodeNodeStrict(value, &probe); err != nil {
+		return err
+	}
+	name := probe.Group
+	if probe.Title != "" {
+		if name != "" {
+			return fmt.Errorf("group: set either `group: %s` or `title:` — not both", probe.Group)
+		}
+		name = probe.Title
+	}
+	if name == "" {
+		return fmt.Errorf("every group needs a name: start it with `- group: <name>`")
+	}
+	children, items := probe.Children, probe.Items
+	switch {
+	case len(children) > 0 && len(items) > 0:
+		return fmt.Errorf("group %q: use either `children:` or `items:` — not both", name)
+	case len(items) > 0:
+		children = items
+	}
+	g.Title, g.Subtitle, g.Groups, g.Items = name, probe.Subtitle, probe.Groups, children
+	return nil
 }
 
 // Config is the root of the YAML config file — the source of truth.
@@ -130,7 +168,7 @@ func (c *Config) FindService(key string) (*Group, Child, bool) {
 	var found *Group
 	var child Child
 	c.Walk(func(path string, g *Group) {
-		for _, ch := range g.Children {
+		for _, ch := range g.Items {
 			if ChildPath(path, ch.Core().Title) == key {
 				found, child = g, ch
 			}
@@ -143,7 +181,7 @@ func (c *Config) FindService(key string) (*Group, Child, bool) {
 func (c *Config) AllTags() []string {
 	set := map[string]bool{}
 	c.Walk(func(path string, g *Group) {
-		for _, ch := range g.Children {
+		for _, ch := range g.Items {
 			for _, t := range ch.Core().Tags {
 				set[t] = true
 			}
@@ -157,38 +195,81 @@ func (c *Config) AllTags() []string {
 	return out
 }
 
-// ChildList decodes the `items` list, discriminating each entry into a
-// Service (has a url) or an App (has a run path).
+// ChildList decodes the children list, discriminating each entry by its
+// START LINE: `- service: <name>` builds a Service, `- app: <name>` builds
+// an App; the plain `- title: <name>` still works and discriminates between
+// them by the url/run fields.
 type ChildList []Child
 
 func (l *ChildList) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.SequenceNode {
-		return fmt.Errorf("items must be a list")
+		return fmt.Errorf("children must be a list")
 	}
 	items := make([]Child, 0, len(value.Content))
 	for _, itemNode := range value.Content {
 		var probe struct {
-			Leaf   `yaml:",inline"`
-			Run    string       `yaml:"run,omitempty"`
-			Health *HealthCheck `yaml:"health,omitempty"`
+			Leaf    `yaml:",inline"`
+			Service string       `yaml:"service,omitempty"`
+			App     string       `yaml:"app,omitempty"`
+			Run     string       `yaml:"run,omitempty"`
+			Health  *HealthCheck `yaml:"health,omitempty"`
 		}
 		if err := decodeNodeStrict(itemNode, &probe); err != nil {
 			return err
 		}
-		if probe.Title == "" {
-			return fmt.Errorf("every item needs a title")
-		}
+		kind, title := "", probe.Title
 		switch {
-		case probe.URL != "" && probe.Run != "":
-			return fmt.Errorf("item %q: set exactly one of `url` or `run`", probe.Title)
-		case probe.Run != "" && probe.Health != nil:
-			return fmt.Errorf("item %q: healthchecks apply to `url` items only", probe.Title)
-		case probe.URL != "":
+		case probe.Service != "" && probe.App != "":
+			return fmt.Errorf("child: set either `service:` or `app:` — not both")
+		case probe.Service != "":
+			kind, title = "service", probe.Service
+		case probe.App != "":
+			kind, title = "app", probe.App
+		}
+		if title == "" {
+			return fmt.Errorf("every child needs a name: start it with `- service: <name>`, `- app: <name>` or `- title: <name>`")
+		}
+		// the resolved name becomes the leaf's title for both syntaxes
+		probe.Leaf.Title = title
+
+		switch {
+		// `- service:` — must be a link
+		case kind == "service":
+			if probe.Run != "" {
+				return fmt.Errorf("service %q: a service is a link; executables belong in `app:` children", title)
+			}
+			if probe.URL == "" {
+				return fmt.Errorf("service %q: needs a `url:`", title)
+			}
 			items = append(items, &Service{Leaf: probe.Leaf, Health: probe.Health})
-		case probe.Run != "":
+
+		// `- app:` — must be a local executable
+		case kind == "app":
+			if probe.URL != "" {
+				return fmt.Errorf("app %q: an app is launched locally — it needs `run:`, not `url:`", title)
+			}
+			if probe.Run == "" {
+				return fmt.Errorf("app %q: needs a `run:` path", title)
+			}
+			if probe.Health != nil {
+				return fmt.Errorf("app %q: healthchecks only apply to `url:` (service) children", title)
+			}
 			items = append(items, &App{Leaf: probe.Leaf, Run: probe.Run})
+
+		// plain `- title:` — discriminate by url/run as before
 		default:
-			return fmt.Errorf("item %q: set exactly one of `url` or `run`", probe.Title)
+			switch {
+			case probe.URL != "" && probe.Run != "":
+				return fmt.Errorf("child %q: set either `url:` (service) or `run:` (app) — not both", title)
+			case probe.Run != "" && probe.Health != nil:
+				return fmt.Errorf("child %q: healthchecks only apply to `url:` (service) children", title)
+			case probe.URL != "":
+				items = append(items, &Service{Leaf: probe.Leaf, Health: probe.Health})
+			case probe.Run != "":
+				items = append(items, &App{Leaf: probe.Leaf, Run: probe.Run})
+			default:
+				return fmt.Errorf("child %q: services need `url:`, apps need `run:` (one of the two)", title)
+			}
 		}
 	}
 	*l = items

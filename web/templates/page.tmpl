@@ -55,17 +55,47 @@
 <section class="filter-row" aria-label="filter">
   <span class="eyebrow">Filter</span>
   <input id="search" class="search" type="search"
-         placeholder="search name, tag or url/ip…" autocomplete="off" autofocus>
+         placeholder="search name, tag or url/ip… (matches every group)" autocomplete="off" autofocus>
   <div class="tag-filter" id="tag-filter">
     <button class="tag active" data-tag="">all</button>
     {{range .AllTags}}<button class="tag" data-tag="{{.}}">{{.}}</button>{{end}}
   </div>
 </section>
 
-<main class="panels">
-  {{range .Groups}}{{template "groups-panel.tmpl" .}}{{end}}
-  {{if not .Groups}}<p class="empty">No groups configured yet — edit <code>config.yml</code> and refresh.</p>{{end}}
-</main>
+<div class="frame">
+  <aside class="sidebar">
+    {{if .Sidebar}}
+    {{template "groups-list.tmpl" .Sidebar}}
+    {{else}}
+    <p class="empty">No groups configured — edit <code>config.yml</code> and refresh.</p>
+    {{end}}
+  </aside>
+
+  <main class="panel">
+    {{range .Panels}}
+    <section class="group-panel {{if not .Selected}}hidden{{end}}{{if .Selected}} selected{{end}}" data-path="{{.Path}}">
+      <header class="panel-head">
+        <div class="panel-id">
+          <h2>{{.Name}}</h2>
+          {{with .Subtitle}}<div class="panel-sub">{{.}}</div>{{end}}
+        </div>
+        <div class="panel-state">
+          <div class="panel-fraction">{{.Fraction}}</div>
+        </div>
+      </header>
+      {{if .Tiles}}
+      <div class="tiles">
+        {{range .Tiles}}{{template "components/group-tile.tmpl" .}}{{end}}
+      </div>
+      {{end}}
+      <div class="rows">
+        {{range .Items}}{{template "components/card.tmpl" .}}{{end}}
+        {{if not .Items}}{{if not .Tiles}}<div class="row-empty">no services yet</div>{{end}}{{end}}
+      </div>
+    </section>
+    {{end}}
+  </main>
+</div>
 
 <div id="toast-stack" class="toast-stack"></div>
 

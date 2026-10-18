@@ -13,24 +13,36 @@ import (
 	"dashboard/internal/styles"
 )
 
-// GroupView is one panel in the grid: header info (icon, host) plus the
-// aggregate state of its direct children (nested groups render as their own
-// panels).
+// SidebarView is one entry of the left column (and, shape-wise, of the
+// drill-down tiles): a group with its live subtree counts.
+type SidebarView struct {
+	Path  string
+	Name  string
+	OK    int
+	Error int
+	Total int
+	// Selected (used with the sidebar entry) marks the server-side default
+	// pick; the browser's remembered selection overrides it on load.
+	Selected bool
+}
+
+// GroupView is the rendered panel for one group: its direct child rows,
+// tiles for its sub-groups, and its aggregated subtree state. Groups are
+// structural — the panel header shows title + subtitle only.
 type GroupView struct {
+	Path     string
 	Name     string
 	Subtitle string
-	Icon     string
-	Host     string
 	Items    []ItemView
-	OK       int // fast answers
+	Tiles    []SidebarView
+
+	OK       int
 	Degraded int
 	Error    int
 	Total    int
 
-	// Fraction is the "4/5" header figure — services answering fast.
-	Fraction  string
-	HostLabel string // "HOST ONLINE" / "HOST DEGRADED" ("" when unhealthchecked)
-	HostClass string // up / degraded / down for coloring
+	Fraction string
+	Selected bool
 }
 
 // ItemView is one service row; Kind distinguishes a link ("service") from a
@@ -68,17 +80,16 @@ type viewData struct {
 	Title     string
 	Summary   SummaryView
 	AllTags   []string
-	Styles    []domain.Style // for the picker options
-	StylesCSS template.CSS   // pre-rendered :root[data-style] blocks (operator-authored values)
-	Groups    []GroupView
+	Styles    []domain.Style
+	StylesCSS template.CSS
 
-	// DefaultStyle is the resolved style id selected on first visit: the
-	// config's defaultStyle if that folder exists, else the first folder.
+	// Sidebar lists the root groups; Panels carries every group's render
+	// (only the selected one is shown, the browser handles selection).
+	Sidebar []SidebarView
+	Panels  []GroupView
+
 	DefaultStyle string
-
-	// CanEdit gates the masthead's editor buttons to match the config's
-	// editAccess for this requester.
-	CanEdit bool
+	CanEdit      bool
 }
 
 // index re-reads the config (so a browser refresh picks up edits), syncs
@@ -89,6 +100,14 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	data := buildView(cfg, s.cfg, s.eng, s.styles)
 	data.CanEdit = editAllowed(cfg, r)
 	s.render(w, "page.tmpl", data)
+}
+
+// groups serves the left column as an htmx fragment so the subtree counts
+// stay live; the browser re-applies its selection after each swap.
+func (s *Server) groups(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfg.Get()
+	s.syncHealth(cfg)
+	s.render(w, "groups-list.tmpl", buildView(cfg, s.cfg, s.eng, s.styles).Sidebar)
 }
 
 // summary serves the masthead stats as an htmx fragment.
@@ -122,7 +141,7 @@ func (s *Server) healthStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) syncHealth(cfg *domain.Config) {
 	targets := make([]health.Target, 0)
 	cfg.Walk(func(path string, g *domain.Group) {
-		for _, ch := range g.Children {
+		for _, ch := range g.Items {
 			svc, isService := ch.(*domain.Service)
 			if !isService || svc.Health == nil {
 				continue
@@ -140,6 +159,102 @@ func (s *Server) syncHealth(cfg *domain.Config) {
 		}
 	})
 	s.eng.SetTargets(s.ctx, targets)
+}
+
+// buildView walks the config tree into the two-column layout: the sidebar
+// of root groups (with subtree counts), a renderable panel per group (its
+// direct rows + sub-group tiles, subtree counts, host label from its own
+// direct children), and the masthead stats.
+func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styleMgr *styles.Manager) viewData {
+	var data viewData
+	data.Title = cfg.Title
+	data.AllTags = cfg.AllTags()
+	data.Styles = styleMgr.All()
+	var blocks []string
+	for _, st := range data.Styles {
+		blocks = append(blocks, st.CSS())
+	}
+	data.StylesCSS = template.CSS(strings.Join(blocks, "\n"))
+	data.DefaultStyle = resolveDefaultStyle(cfg, data.Styles)
+
+	var visit func(path string, g *domain.Group) GroupView
+	visit = func(path string, g *domain.Group) GroupView {
+		data.Summary.Hosts++
+		gv := GroupView{
+			Path:     path,
+			Name:     g.Title,
+			Subtitle: g.Subtitle,
+			Total:    len(g.Items),
+		}
+		for _, ch := range g.Items {
+			leaf := ch.Core()
+			v := ItemView{
+				Key:      domain.ChildPath(path, leaf.Title),
+				Name:     leaf.Title,
+				Subtitle: leaf.Subtitle,
+				URL:      leaf.URL,
+				Icon:     mgr.ResolveIcon(leaf.Icon),
+				Tags:     leaf.Tags,
+				Kind:     "service",
+			}
+			if svc, isService := ch.(*domain.Service); isService {
+				if svc.Health != nil {
+					threshold, err := svc.Health.DegradedD()
+					if err != nil {
+						threshold = domain.DefaultDegradedAfter // validated at load
+					}
+					v.Health = healthView(eng, v.Key, threshold)
+					switch v.Health.Status {
+					case "up":
+						gv.OK++
+					case "degraded":
+						gv.Degraded++
+						data.Summary.Alerts++
+					case "down":
+						gv.Error++
+						data.Summary.Alerts++
+					}
+				}
+			} else if app, isApp := ch.(*domain.App); isApp {
+				v.Kind = "app"
+				v.Run = app.Run
+			}
+			gv.Items = append(gv.Items, v)
+		}
+		for i := range g.Groups {
+			sub := g.Groups[i]
+			subPath := domain.ChildPath(path, sub.Title)
+			// recursion builds the sub panel AND returns its subtree counts
+			subTree := visit(subPath, &sub)
+			gv.OK += subTree.OK
+			gv.Error += subTree.Error
+			gv.Total += subTree.Total
+			gv.Tiles = append(gv.Tiles, SidebarView{Path: subPath, Name: sub.Title,
+				OK: subTree.OK, Error: subTree.Error, Total: subTree.Total})
+		}
+		gv.Fraction = itoa(gv.OK) + "/" + itoa(gv.Total)
+		return gv
+	}
+
+	for i := range cfg.Groups {
+		gv := visit(cfg.Groups[i].Title, &cfg.Groups[i])
+		// server-side default selection: the first root group; the browser's
+		// remembered pick overrides on load
+		gv.Selected = i == 0
+		data.Panels = append(data.Panels, gv)
+		data.Summary.OK += gv.OK
+		data.Summary.Total += gv.Total
+		// sidebar entry per root group
+		data.Sidebar = append(data.Sidebar, SidebarView{
+			Path:     gv.Path,
+			Name:     gv.Name,
+			OK:       gv.OK,
+			Error:    gv.Error,
+			Total:    gv.Total,
+			Selected: gv.Selected,
+		})
+	}
+	return data
 }
 
 // resolveDefaultStyle picks the style selected on first visit: the config's
@@ -160,84 +275,7 @@ func resolveDefaultStyle(cfg *domain.Config, styles []domain.Style) string {
 	return ""
 }
 
-// buildView walks the config tree and projects it into the panel grid:
-// per-service status blocks, per-group fractions and host labels, and the
-// masthead stats. "Up" counts only fast answers; slow ones are DEGRADED and
-// join OFFLINE ones in the ALERTS figure.
-func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styles *styles.Manager) viewData {
-	var data viewData
-	data.Title = cfg.Title
-	data.AllTags = cfg.AllTags()
-	data.Styles = styles.All()
-	var blocks []string
-	for _, st := range data.Styles {
-		blocks = append(blocks, st.CSS())
-	}
-	data.StylesCSS = template.CSS(strings.Join(blocks, "\n"))
-	data.DefaultStyle = resolveDefaultStyle(cfg, data.Styles)
-	data.Summary.Hosts = 0
-
-	cfg.Walk(func(path string, g *domain.Group) {
-		data.Summary.Hosts++
-		gv := GroupView{
-			Name:     g.Title,
-			Subtitle: g.Subtitle,
-			Icon:     mgr.ResolveIcon(g.Icon),
-			Host:     g.Host,
-			Total:    len(g.Children),
-		}
-		checked := false
-		for _, ch := range g.Children {
-			leaf := ch.Core()
-			v := ItemView{
-				Key:      domain.ChildPath(path, leaf.Title),
-				Name:     leaf.Title,
-				Subtitle: leaf.Subtitle,
-				URL:      leaf.URL,
-				Icon:     mgr.ResolveIcon(leaf.Icon),
-				Tags:     leaf.Tags,
-				Kind:     "service",
-			}
-			if svc, isService := ch.(*domain.Service); isService {
-				if svc.Health != nil {
-					threshold, err := svc.Health.DegradedD()
-					if err != nil {
-						threshold = domain.DefaultDegradedAfter // validated at load
-					}
-					checked = true
-					v.Health = healthView(eng, v.Key, threshold)
-					switch v.Health.Status {
-					case "up":
-						gv.OK++
-					case "degraded":
-						gv.Degraded++
-						data.Summary.Alerts++
-					case "down":
-						gv.Error++
-						data.Summary.Alerts++
-					}
-				}
-			} else if app, isApp := ch.(*domain.App); isApp {
-				v.Kind = "app"
-				v.Run = app.Run
-			}
-			gv.Items = append(gv.Items, v)
-		}
-		gv.Fraction = strconv.Itoa(gv.OK) + "/" + strconv.Itoa(gv.Total)
-		switch {
-		case !checked:
-			// group without healthchecks: no host state to speak of
-		case gv.Degraded > 0:
-			gv.HostLabel, gv.HostClass = "HOST DEGRADED", "degraded"
-		default:
-			gv.HostLabel, gv.HostClass = "HOST ONLINE", "up"
-		}
-		data.Summary.OK += gv.OK
-		data.Summary.Total += gv.Total
-		data.Groups = append(data.Groups, gv)
-	})
-	return data
-}
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // healthView classifies the latest probe: fast answers ONLINE, slow answers
 // DEGRADED, failures OFFLINE.
