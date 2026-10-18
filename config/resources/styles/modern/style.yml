@@ -1,0 +1,18 @@
+# Modern style — indigo-ink theme.
+# font / titleFont are files in THIS folder (relative paths, subfolders ok).
+# If a referenced file is missing the UI falls back to Arial.
+name: Modern
+titleFontSize: 1.05rem          # display font likes a bit more room
+colors:
+  bg: "#323353"
+  panel: "#484a77"
+  inset: "#374e4a"
+  raised: "#625565"
+  text: "#c7dcd0"
+  muted: "#9babb2"
+  accent: "#4d9be6"
+  up: "#30e1b9"
+  down: "#e83b3b"
+  degraded: "#f79617"
+  pending: "#9babb2"
+  chip: "color-mix(in srgb, #374e4a 60%, transparent)"

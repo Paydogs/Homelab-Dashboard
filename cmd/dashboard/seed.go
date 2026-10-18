@@ -8,18 +8,18 @@ import (
 )
 
 // seedDefaults copies the shipped default files (sample config and starter
-// styles) into the config folder — ONLY when there is no config file yet
+// styles) into the data folder — ONLY when there is no config file yet
 // (first boot): an existing dashboard is never touched. The app then
 // behaves identically afterwards; everything can be edited through the web
 // UI's edit buttons.
-func seedDefaults(configPath, defaultsDir string, logger *log.Logger) error {
-	if _, err := os.Stat(configPath); err == nil {
+func seedDefaults(dataDir, defaultsDir string, logger *log.Logger) error {
+	if _, err := os.Stat(filepath.Join(dataDir, "config.yml")); err == nil {
 		return nil // existing dashboard: leave it alone
 	}
 	if _, err := os.Stat(defaultsDir); err != nil {
 		return nil // no defaults shipped (plain binary run): nothing to seed
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
 	}
 	return filepath.WalkDir(defaultsDir, func(path string, d os.DirEntry, err error) error {
@@ -30,7 +30,7 @@ func seedDefaults(configPath, defaultsDir string, logger *log.Logger) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(filepath.Dir(configPath), rel)
+		target := filepath.Join(dataDir, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"dashboard/domain"
 )
@@ -26,13 +25,15 @@ groups:
         tags: [games]
 `
 
+// write drops a config.yml into a fresh data dir and returns the dir —
+// NewManager takes a data directory (config.yml + resources live there).
 func write(t *testing.T, contents string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yml")
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return dir
 }
 
 func testLogger(t *testing.T) *log.Logger {
@@ -173,16 +174,15 @@ func TestDuplicateTitlesRejected(t *testing.T) {
 // manager reloads when the file's metadata changes: a browser refresh must
 // pick up edits with no restart.
 func TestReloadOnChange(t *testing.T) {
-	path := write(t, valid)
-	mgr, err := NewManager(path, testLogger(t))
+	dir := write(t, valid)
+	mgr, err := NewManager(dir, testLogger(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	changed := strings.Replace(valid, "title: Test", "title: Changed", 1)
-	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(changed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_ = time.Second
 	if got := mgr.Get().Title; got != "Changed" {
 		t.Errorf("title after reload = %q, want Changed", got)
 	}

@@ -1,0 +1,77 @@
+# Homelab dashboard config — this file is the source of truth.
+# Copy to config.yml (next to where the dashboard runs) and edit freely:
+# a browser refresh is enough, no rebuild or restart needed.
+#
+# The content is a tree. Groups are parents — each one can hold more
+# `groups` (sub-panels) and `items` (the children). Children are the end
+# leafs; each item is either a Service (a `url`, opened in the browser) or
+# an App (a `run`, launched on the dashboard's own machine after a confirm).
+# The first group's panels follow your config's order.
+
+title: Magni PC
+
+# the style selected on first visit — a resources/styles folder name;
+# a viewer's own pick is remembered in the browser. If the name is not
+# found the first folder is used.
+defaultStyle: modern
+
+# who may use the web editors (config + style): "local" (default — only
+# the dashboard's own machine), "lan" (any private-network client) or
+# "any". Set to "lan" when the dashboard runs on a VM and you browse it
+# from your PC.
+editAccess: lan
+
+groups:
+  - title: Favourites
+    icon: https://raw.githubusercontent.com/…/favourites.png   # optional
+    host: 192.168.1.5                                          # optional; shown in the panel header
+    items:
+      - title: Proxmox VE
+        subtitle: hypervisor
+        url: https://192.168.1.5:8006
+        icon: https://raw.githubusercontent.com/…/proxmox-icon.svg
+        tags: [infra, virt]
+
+      - title: Pi-hole
+        url: http://192.168.1.10/admin
+        tags: [network, dns]
+        health:
+          path: /
+          interval: 30s
+
+  - title: Servers
+    groups:
+      - title: Server 1
+        host: 192.168.1.30
+        items:
+          - title: Gitea
+            url: http://192.168.1.30:3000
+            tags: [dev]
+            health:
+              path: /
+              interval: 60s
+              degraded_after: 250ms   # answers slower than this show DEGRADED
+
+      - title: Server 2
+        host: 192.168.1.31
+        items:
+          - title: Jellyfin
+            url: http://192.168.1.31:8096
+            tags: [media]
+            health:
+              path: /health
+              interval: 30s
+
+  - title: Desktop (local)
+    # `run` items only work when the dashboard itself runs on that machine
+    # (not in Docker). The UI shows a confirm step before launching; only
+    # executables explicitly listed here can ever be started.
+    items:
+      - title: Steam
+        run: C:\Program Files (x86)\Steam\steam.exe
+        icon: steam.png   # any file placed in <config-dir>/resources/icons/
+        tags: [games, local]
+
+      - title: Notepad
+        run: notepad.exe
+        tags: [local]

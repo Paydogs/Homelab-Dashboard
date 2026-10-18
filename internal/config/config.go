@@ -19,11 +19,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Manager owns the YAML file: it parses it, validates it, watches the file
-// metadata and re-reads it on demand. Callers call Get() on every render; a
-// browser refresh therefore picks up config edits with no rebuild, no
-// restart, and no build step.
+// Manager owns the data folder: config.yml lives at its root, URL icons
+// cache under resources/, and the YAML is parsed, validated and re-read
+// from disk on demand. Callers call Get() on every render; a browser
+// refresh therefore picks up config edits with no rebuild, no restart,
+// and no build step.
 type Manager struct {
+	dataDir  string
 	path     string
 	resPath  string
 	logger   *log.Logger
@@ -36,12 +38,17 @@ type Manager struct {
 // NewManager loads the config once and fails fast on a bad file so an
 // operator gets a useful error immediately, with line numbers from the
 // YAML parser.
-func NewManager(path string, logger *log.Logger) (*Manager, error) {
-	abs, err := filepath.Abs(path)
+func NewManager(dataDir string, logger *log.Logger) (*Manager, error) {
+	abs, err := filepath.Abs(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolving config path: %w", err)
+		return nil, fmt.Errorf("resolving data dir: %w", err)
 	}
-	m := &Manager{path: abs, resPath: filepath.Join(filepath.Dir(abs), "resources"), logger: logger}
+	m := &Manager{
+		dataDir: abs,
+		path:    filepath.Join(abs, "config.yml"),
+		resPath: filepath.Join(abs, "resources"),
+		logger:  logger,
+	}
 	if err := m.reloadLocked(); err != nil {
 		return nil, err
 	}
@@ -61,6 +68,9 @@ func (m *Manager) Get() *domain.Config {
 	}
 	return m.cfg
 }
+
+// DataDir is the dashboard's data folder (config.yml + resources/).
+func (m *Manager) DataDir() string { return m.dataDir }
 
 // ResourcesDir is the folder where URL icons are cached locally.
 func (m *Manager) ResourcesDir() string { return m.resPath }
@@ -150,11 +160,12 @@ func validate(c *domain.Config) error {
 		c.Title = "Homelab"
 	}
 	switch strings.ToLower(c.EditAccess) {
-	case "", "local", "lan", "any":
+	case "":
+		// no explicit value: the editable switch decides
+		c.EditAccessSet = false
+	case "local", "lan", "any":
 		c.EditAccess = strings.ToLower(c.EditAccess)
-		if c.EditAccess == "" {
-			c.EditAccess = "local"
-		}
+		c.EditAccessSet = true // spelled out — priority over editable
 	default:
 		return fmt.Errorf("editAccess must be one of local, lan or any (got %q)", c.EditAccess)
 	}

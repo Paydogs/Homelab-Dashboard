@@ -25,13 +25,15 @@ opens them fast, and monitors their health. Technical direction follows projects
 
 ## UI design (reference: `Examples/*.pdf`, the "Control" mockup)
 
-- **Masthead block:** `TITLE // CONTROL` eyebrow, big live clock (HH:MM + small seconds, date
-  line below), on the right: the **edit config button** (opens an overlay with the raw config.yml
-  in a textarea; Save validates server-side and atomic-replaces the file — invalid YAML is
-  rejected with the parser's line numbers and the file is untouched; localhost-only), the **style
-  picker** (accent theme select), and stats columns (`SERVICES up/total`, `HOSTS = number of
-  groups`, `ALERTS = degraded + offline count`). Stats are an htmx fragment (`GET /summary`,
-  refreshed on a timer).
+- **Masthead block:** `TITLE` eyebrow, big live clock (HH:MM + small seconds, date
+  line below), on the right: the **edit config button** (overlay with the raw config.yml,
+  validate-then-atomic-write, line-numbered errors) and the **edit style button** (two panels:
+  read-only full base file on the left, the style's overwrite.yml on the right — the effective
+  style is base merged with overwrite). Editor access follows the config's `editable` bool /
+  `editAccess` (local default | lan | any — the buttons are hidden for viewers without access);
+  the `run:` launcher stays host-only. Plus the **style picker** and stats columns
+  (`SERVICES up/total`, `HOSTS = number of groups`, `ALERTS = degraded + offline count`); stats
+  are an htmx fragment (`GET /summary`, refreshed on a timer).
 - **Filter row:** search box (matches **name, tags, url/ip**) + tag chips (`all` + every distinct
   tag). Search/tag filtering covers all panels at once; empty panels hide while filtering.
 - **Panel grid:** one panel per group (2-col responsive grid). Panel header: group icon box,
@@ -52,13 +54,15 @@ opens them fast, and monitors their health. Technical direction follows projects
   (sanitized: style id + no traversal); a style without a font ref inherits the mono token stack;
   `main.css`'s `:root` tokens are the base fallback when the folder is empty.
 
-## Architecture
+## Data layout (the -data folder)
 
-- `domain/` — the domain models live here and are instantiated by the other packages: the content
-  **tree** (Config → Groups → children), the child kinds (Service, App), the health state models
-  (Status, ProbeResult) and the HealthCheck spec. config, health and server import these types
-  instead of redefining shapes. Presentation projections (ItemView/GroupView/…) stay in the
-  server package.
+The dashboard's canonical layout is **one data dir** passed via `-data` (default `.`):
+`config.yml` sits in its root, URL icons cache in `resources/icons/`, styles live in
+`resources/styles/<id>/style.yml` + `overwrite.yml` (+ fonts). In Docker, the host's `./data`
+bind-mounts as `/data` (see compose); the image ships first-boot defaults at `/defaults`
+(sample config + starter styles), copied out by the app only while `/data/config.yml` doesn't
+exist — never overwriting existing files. `install.sh` migrates the pre-1.0 `./config` folder
+into `./data`.
 
 ## Domain model (the data layer)
 

@@ -1,8 +1,7 @@
-# local, per-machine dashboard config — config.example.yml is the tracked template
+# runtime state: the dashboard's data folder (config.yml + resources/)
+# — config.example.yml is the tracked template
 /config.yml
-
-# runtime state: downloaded URL icons and launched outputs
-/resources/
+/data/
 /dist/
 
 # build output
@@ -11,4 +10,3 @@
 # local compose override (build from this working tree, never deployed)
 docker-compose.override.yml
 Examples/
-/config/

@@ -2,15 +2,20 @@
 #
 # The image is built straight from the GitHub repo inside Docker's own
 # stages: nothing needs to be checked out on this machine. On first boot
-# the app seeds ./config with a sample config.yml and starter styles
-# (only when ./config has no config.yml yet) — after that, edit everything
-# through the dashboard's edit buttons or the files in ./config.
+# the app seeds ./data with a sample config.yml and starter styles
+# (only when /data has no config.yml yet) — after that, edit everything
+# through the dashboard's edit buttons or directly in ./data.
 #
 # Deploy:
 #   docker compose up -d
 #
 # Update (pulls fresh code from GitHub and rebuilds):
 #   docker compose up -d --build
+#
+# Data folder (this is where the dashboard's files live):
+#   ./data/config.yml                 the dashboard config
+#   ./data/resources/icons/           URL icon cache
+#   ./data/resources/styles/<id>/     styles (+ overwrite.yml, fonts)
 #
 # `run:` items (local executables) only work when the dashboard runs on
 # that machine, not in the container — skip them in the container setup.
@@ -21,13 +26,13 @@ services:
     build: https://github.com/Paydogs/Homelab-Dashboard.git#master
     container_name: homelab-dashboard
     restart: unless-stopped
-    # run as the deploying user (uid:gid) so ./config is writable —
+    # run as the deploying user (uid:gid) so ./data is writable —
     # DASH_UID/GID are set by install.sh; defaults match the image's
     # built-in user. Delete this line to force the image's 1000:1000.
     user: "${DASH_UID:-1000}:${DASH_GID:-1000}"
     ports:
       - "8080:8080"
     volumes:
-      - ./config:/config
+      - ./data:/data   # the resource line: where ALL dashboard data lives
     # environment:
     #   TZ: Etc/UTC              # your local timezone for health timestamps

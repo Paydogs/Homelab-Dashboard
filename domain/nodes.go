@@ -88,6 +88,15 @@ type Config struct {
 	// private-network client; "any" — no restriction (public deploys
 	// beware). The local `run:` launcher stays local-only regardless.
 	EditAccess string `yaml:"editAccess,omitempty"`
+
+	// Editable is the simple switch for enabling editing from wherever the
+	// dashboard is browsed (a VM serving the LAN included): true behaves
+	// like editAccess "lan". An explicitly set editAccess wins over it.
+	Editable bool `yaml:"editable,omitempty"`
+
+	// EditAccessSet records whether editAccess was spelled out in the YAML
+	// (the explicit option then takes priority over Editable). Not in YAML.
+	EditAccessSet bool `yaml:"-"`
 }
 
 // Walk visits every group in the tree, in order, with its full path

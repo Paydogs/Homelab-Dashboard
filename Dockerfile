@@ -21,15 +21,16 @@ FROM scratch AS final
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
-# /config is a bind-mount point — the YAML and the downloaded icon cache
-# live here on the host, never inside the image. /defaults carries the
+# /data is the bind-mount point — the dashboard's whole data folder
+# (config.yml, resources/icons cache, resources/styles + overwrite files)
+# lives here on the host, never inside the image. /defaults carries the
 # first-boot sample config + starter styles, copied out by the app when
-# /config has no config.yml yet.
-COPY --from=build --chown=1000:1000 /out/config /config
+# /data has no config.yml yet.
+COPY --from=build --chown=1000:1000 /out/config /data
 COPY --from=build /out/defaults /defaults
 COPY --from=build /out/dashboard /dashboard
 
 ENV TZ=Etc/UTC
 USER 1000:1000
 EXPOSE 8080
-ENTRYPOINT ["/dashboard", "-config", "/config/config.yml", "-listen", ":8080", "-defaults", "/defaults"]
+ENTRYPOINT ["/dashboard", "-data", "/data", "-listen", ":8080", "-defaults", "/defaults"]

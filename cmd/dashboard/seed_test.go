@@ -19,15 +19,15 @@ func TestSeedDefaultsFirstBoot(t *testing.T) {
 	os.WriteFile(filepath.Join(defaults, "config.yml"), []byte("title: Sample\n"), 0o644)
 	os.WriteFile(filepath.Join(defaults, "resources", "styles", "modern", "style.yml"), []byte("name: Modern\n"), 0o644)
 
-	configPath := filepath.Join(root, "config", "config.yml")
-	if err := seedDefaults(configPath, defaults, testLogger()); err != nil {
+	configPath := filepath.Join(root, "data", "config.yml")
+	if err := seedDefaults(filepath.Dir(configPath), defaults, testLogger()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil || string(data) != "title: Sample\n" {
 		t.Fatalf("config seeded = %q, err %v", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "config", "resources", "styles", "modern", "style.yml")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "data", "resources", "styles", "modern", "style.yml")); err != nil {
 		t.Errorf("seeded style missing: %v", err)
 	}
 }
@@ -38,11 +38,11 @@ func TestSeedDefaultsSkipsExisting(t *testing.T) {
 	defaults := filepath.Join(root, "defaults")
 	os.WriteFile(filepath.Join(defaults, "config.yml"), []byte("title: Sample\n"), 0o644)
 
-	configPath := filepath.Join(root, "config", "config.yml")
+	configPath := filepath.Join(root, "data", "config.yml")
 	os.MkdirAll(filepath.Dir(configPath), 0o755)
 	os.WriteFile(configPath, []byte("title: Mine\n"), 0o644)
 
-	if err := seedDefaults(configPath, defaults, testLogger()); err != nil {
+	if err := seedDefaults(filepath.Dir(configPath), defaults, testLogger()); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(configPath)
@@ -54,7 +54,7 @@ func TestSeedDefaultsSkipsExisting(t *testing.T) {
 // a plain binary run without a defaults folder seeds nothing and errors not
 func TestSeedDefaultsNoFolder(t *testing.T) {
 	root := t.TempDir()
-	if err := seedDefaults(filepath.Join(root, "config", "config.yml"), filepath.Join(root, "missing"), testLogger()); err != nil {
+	if err := seedDefaults(filepath.Join(root, "data", "config.yml"), filepath.Join(root, "missing"), testLogger()); err != nil {
 		t.Errorf("no defaults dir should be a no-op, got %v", err)
 	}
 }
