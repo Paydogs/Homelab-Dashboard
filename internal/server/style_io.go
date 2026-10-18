@@ -19,7 +19,7 @@ import (
 const maxStyleSize = 1 << 16 // 64 KiB of style YAML is plenty
 
 func (s *Server) styleSource(w http.ResponseWriter, r *http.Request) {
-	if !isLocal(r) {
+	if !editAllowed(s.cfg.Get(), r) {
 		http.Error(w, "style editing is only available from the dashboard host", http.StatusForbidden)
 		return
 	}
@@ -58,7 +58,7 @@ func (s *Server) styleSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) saveStyle(w http.ResponseWriter, r *http.Request) {
-	if !isLocal(r) {
+	if !editAllowed(s.cfg.Get(), r) {
 		http.Error(w, "style editing is only available from the dashboard host", http.StatusForbidden)
 		return
 	}

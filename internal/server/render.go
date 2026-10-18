@@ -75,6 +75,10 @@ type viewData struct {
 	// DefaultStyle is the resolved style id selected on first visit: the
 	// config's defaultStyle if that folder exists, else the first folder.
 	DefaultStyle string
+
+	// CanEdit gates the masthead's editor buttons to match the config's
+	// editAccess for this requester.
+	CanEdit bool
 }
 
 // index re-reads the config (so a browser refresh picks up edits), syncs
@@ -82,7 +86,9 @@ type viewData struct {
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Get()
 	s.syncHealth(cfg)
-	s.render(w, "page.tmpl", buildView(cfg, s.cfg, s.eng, s.styles))
+	data := buildView(cfg, s.cfg, s.eng, s.styles)
+	data.CanEdit = editAllowed(cfg, r)
+	s.render(w, "page.tmpl", data)
 }
 
 // summary serves the masthead stats as an htmx fragment.

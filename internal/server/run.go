@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"os/exec"
 
@@ -40,10 +39,6 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 // isLocal reports whether the request arrived from the dashboard host
 // itself (IPv4 or IPv6 loopback, with or without a port).
 func isLocal(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	ip := requestIP(r)
+	return ip.IsValid() && ip.IsLoopback()
 }

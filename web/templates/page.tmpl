@@ -22,6 +22,7 @@
           {{range .Styles}}<option value="{{.ID}}"{{if eq .ID $.DefaultStyle}} selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>
+      {{if .CanEdit}}
       <button id="edit-style-btn" class="edit-btn" type="button" title="Edit the current style (base + overrides)" aria-label="Edit style">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M11 4a7.7 7.7 0 1 0 .6 15.4L21 19a1 1 0 0 0 .8-1.4L13.6 4.7A3 3 0 0 0 11 4Z"/>
@@ -35,6 +36,7 @@
           <path d="M13.5 6.5l3 3"/>
         </svg>
       </button>
+      {{end}}
     </div>
   </div>
   <div class="masthead-blocks">

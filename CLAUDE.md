@@ -154,13 +154,13 @@ on bad config.
 
 ## Commands
 
-- `go run ./cmd/dashboard` — run locally for development
+- `docker compose up -d --build` — **run the app locally and on the VM**. Locally, the
+  gitignored `docker-compose.override.yml` points `build:` at this working tree (uncommitted
+  changes included); without it (the VM) the build comes straight from the GitHub URL in
+  `docker-compose.yml`. Never build/launch a stray exe to "run locally".
 - `go build ./...` / `go vet ./...` / `gofmt -w .` — before declaring work done
-- `go test ./...` — tests exist for config parsing/validation and healthcheck state
-- `docker compose up -d --build` — the supported container deployment (Dockerfile: multi-stage,
-  `CGO_ENABLED=0`, `scratch` final image, runs as uid 1000). `./config.yml` is bind-mounted to
-  `/config/config.yml` and URL icons cache in `./resources/` — both stay on the host, never baked
-  into the image.
+- `go test ./...` — tests exist for config parsing/validation, healthcheck state, styles and
+  the edit-access checks
 
 ## Conventions
 

@@ -1,0 +1,17 @@
+# Retro style — warm plum theme.
+# font / titleFont are files in THIS folder (relative paths, subfolders ok).
+# If a referenced file is missing the UI falls back to Arial.
+name: Retro
+colors:
+  bg: "#2e222f"
+  panel: "#3e3546"
+  inset: "color-mix(in srgb, #625565 45%, #2e222f)"
+  raised: "#625565"
+  text: "#c7dcd0"
+  muted: "#9babb2"
+  accent: "#4d9be6"
+  up: "#30e1b9"
+  down: "#e83b3b"
+  degraded: "#f79617"
+  pending: "#9babb2"
+  chip: "color-mix(in srgb, #374e4a 60%, transparent)"

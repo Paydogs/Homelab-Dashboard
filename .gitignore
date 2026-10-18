@@ -8,4 +8,7 @@
 # build output
 *.exe
 *.exe~
+# local compose override (build from this working tree, never deployed)
+docker-compose.override.yml
 Examples/
+/config/

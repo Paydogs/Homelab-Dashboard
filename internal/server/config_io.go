@@ -14,7 +14,7 @@ import (
 const maxConfigSize = 1 << 20 // 1 MiB of YAML is plenty for a homelab
 
 func (s *Server) configSource(w http.ResponseWriter, r *http.Request) {
-	if !isLocal(r) {
+	if !editAllowed(s.cfg.Get(), r) {
 		http.Error(w, "config editing is only available from the dashboard host", http.StatusForbidden)
 		return
 	}
@@ -28,7 +28,7 @@ func (s *Server) configSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
-	if !isLocal(r) {
+	if !editAllowed(s.cfg.Get(), r) {
 		http.Error(w, "config editing is only available from the dashboard host", http.StatusForbidden)
 		return
 	}

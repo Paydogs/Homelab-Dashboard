@@ -149,6 +149,15 @@ func validate(c *domain.Config) error {
 	if c.Title == "" {
 		c.Title = "Homelab"
 	}
+	switch strings.ToLower(c.EditAccess) {
+	case "", "local", "lan", "any":
+		c.EditAccess = strings.ToLower(c.EditAccess)
+		if c.EditAccess == "" {
+			c.EditAccess = "local"
+		}
+	default:
+		return fmt.Errorf("editAccess must be one of local, lan or any (got %q)", c.EditAccess)
+	}
 	seen := map[string]bool{}
 	var walk func(prefix string, g *domain.Group) error
 	walk = func(prefix string, g *domain.Group) error {

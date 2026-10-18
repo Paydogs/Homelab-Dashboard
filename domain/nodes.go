@@ -82,6 +82,12 @@ type Config struct {
 	// "modern") selected on first visit; a viewer's own pick is kept in
 	// the browser. When unset or not found, the first style folder wins.
 	DefaultStyle string `yaml:"defaultStyle,omitempty"`
+
+	// EditAccess controls who may use the web editors (config + style):
+	// "local" (default) — only the dashboard's own machine; "lan" — any
+	// private-network client; "any" — no restriction (public deploys
+	// beware). The local `run:` launcher stays local-only regardless.
+	EditAccess string `yaml:"editAccess,omitempty"`
 }
 
 // Walk visits every group in the tree, in order, with its full path

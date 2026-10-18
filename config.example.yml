@@ -15,6 +15,12 @@ title: Homelab
 # found the first folder is used.
 defaultStyle: modern
 
+# who may use the web editors (config + style): "local" (default — only
+# the dashboard's own machine), "lan" (any private-network client) or
+# "any". Set to "lan" when the dashboard runs on a VM and you browse it
+# from your PC.
+editAccess: lan
+
 groups:
   - title: Favourites
     icon: https://raw.githubusercontent.com/…/favourites.png   # optional

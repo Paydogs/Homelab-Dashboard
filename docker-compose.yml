@@ -1,28 +1,33 @@
-# Homelab dashboard — deploy on Debian or a Windows machine with Docker.
+# Homelab dashboard — deployable from this single file.
 #
-# First run:
-#   cp config.example.yml config.yml   (edit services/tags to your lab)
+# The image is built straight from the GitHub repo inside Docker's own
+# stages: nothing needs to be checked out on this machine. On first boot
+# the app seeds ./config with a sample config.yml and starter styles
+# (only when ./config has no config.yml yet) — after that, edit everything
+# through the dashboard's edit buttons or the files in ./config.
+#
+# Deploy:
+#   docker compose up -d
+#
+# Update (pulls fresh code from GitHub and rebuilds):
 #   docker compose up -d --build
 #
-# Config is bind-mounted, never baked in: edit config.yml, refresh the
-# browser — no rebuild, no restart.
+# `run:` items (local executables) only work when the dashboard runs on
+# that machine, not in the container — skip them in the container setup.
 
 services:
   dashboard:
-    build: .
     image: homelab-dashboard
+    build: https://github.com/Paydogs/Homelab-Dashboard.git#master
     container_name: homelab-dashboard
     restart: unless-stopped
+    # run as the deploying user (uid:gid) so ./config is writable —
+    # DASH_UID/GID are set by install.sh; defaults match the image's
+    # built-in user. Delete this line to force the image's 1000:1000.
+    user: "${DASH_UID:-1000}:${DASH_GID:-1000}"
     ports:
       - "8080:8080"
     volumes:
-      - ./config.yml:/config/config.yml
-      - ./resources:/config/resources   # downloaded URL icons are cached here
+      - ./config:/config
     # environment:
-    #   TZ: Etc/UTC              # set your local timezone for health timestamps
-    # On Debian, if the icon cache fails to persist:
-    #   chown -R 1000:1000 resources/
-    # or run the container as your own uid:
-    # user: "1000:1000"
-    # `run:` items are disabled in Docker: executables live on the host,
-    # not in the container.
+    #   TZ: Etc/UTC              # your local timezone for health timestamps
