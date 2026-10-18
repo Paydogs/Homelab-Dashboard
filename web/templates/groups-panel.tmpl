@@ -1,0 +1,17 @@
+<article class="group-panel" data-text="{{lower .Name}} {{lower .Host}}">
+  <header class="panel-head">
+    <img class="panel-icon" src="{{.Icon}}" alt="" loading="lazy">
+    <div class="panel-id">
+      <h2>{{.Name}}</h2>
+      {{if .Host}}<div class="panel-host">{{.Host}}</div>{{end}}
+    </div>
+    <div class="panel-state">
+      <div class="panel-fraction">{{.Fraction}}</div>
+      {{if .HostLabel}}<div class="panel-hoststate {{.HostClass}}">{{.HostLabel}}</div>{{end}}
+    </div>
+  </header>
+  <div class="rows">
+    {{range .Items}}{{template "components/card.tmpl" .}}{{end}}
+    {{if not .Items}}<div class="row-empty">no services yet</div>{{end}}
+  </div>
+</article>

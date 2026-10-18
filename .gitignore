@@ -1,0 +1,11 @@
+# local, per-machine dashboard config — config.example.yml is the tracked template
+/config.yml
+
+# runtime state: downloaded URL icons and launched outputs
+/resources/
+/dist/
+
+# build output
+*.exe
+*.exe~
+Examples/

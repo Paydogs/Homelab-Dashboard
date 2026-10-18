@@ -1,0 +1,14 @@
+<dl class="stats">
+  <div class="stat">
+    <dt class="eyebrow">Services</dt>
+    <dd class="stat-num">{{.OK}}/{{.Total}}</dd>
+  </div>
+  <div class="stat">
+    <dt class="eyebrow">Hosts</dt>
+    <dd class="stat-num">{{.Hosts}}</dd>
+  </div>
+  <div class="stat">
+    <dt class="eyebrow">Alerts</dt>
+    <dd class="stat-num alerts {{if gt .Alerts 0}}has-alerts{{end}}">{{.Alerts}}</dd>
+  </div>
+</dl>

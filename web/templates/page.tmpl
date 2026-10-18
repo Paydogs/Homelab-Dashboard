@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<link rel="icon" href="/static/icons/globe.svg">
+<link rel="stylesheet" href="/static/css/main.css">
+<script src="/static/vendor/htmx.min.js" defer></script>
+<script src="/static/vendor/alpine.min.js" defer></script>
+<script src="/static/js/ui.js" defer></script>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-left">
+    <div class="eyebrow">{{.Title}} // control</div>
+    <div class="clock">
+      <span id="clock-time">--:--</span><span class="clock-seconds" id="clock-seconds">00</span>
+    </div>
+    <div class="clock-date" id="clock-date"></div>
+  </div>
+  <div class="masthead-right">
+    <label class="style-picker">
+      <select id="style-select" aria-label="style">
+        <option value="retro">Retro</option>
+        <option value="teal">Teal</option>
+        <option value="ember">Ember</option>
+      </select>
+    </label>
+    <div class="masthead-stats" hx-get="/summary" hx-trigger="every 15s" hx-swap="outerHTML">
+      {{template "summary.tmpl" .Summary}}
+    </div>
+  </div>
+</header>
+
+<section class="filter-row" aria-label="filter">
+  <span class="eyebrow">Filter</span>
+  <input id="search" class="search" type="search"
+         placeholder="search name, tag or url/ip…" autocomplete="off" autofocus>
+  <div class="tag-filter" id="tag-filter">
+    <button class="tag active" data-tag="">all</button>
+    {{range .AllTags}}<button class="tag" data-tag="{{.}}">{{.}}</button>{{end}}
+  </div>
+</section>
+
+<main class="panels">
+  {{range .Groups}}{{template "groups-panel.tmpl" .}}{{end}}
+  {{if not .Groups}}<p class="empty">No groups configured yet — edit <code>config.yml</code> and refresh.</p>{{end}}
+</main>
+
+<div id="toast-stack" class="toast-stack"></div>
+</body>
+</html>

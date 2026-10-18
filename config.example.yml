@@ -1,0 +1,53 @@
+# Homelab dashboard config — this file is the source of truth.
+# Copy to config.yml (next to where the dashboard runs) and edit freely:
+# a browser refresh is enough, no rebuild or restart needed.
+#
+# The design expects groups like: Favourites, System, Proxmox, Arcane,
+# Server 1 … — the left-column blocks follow your config's group order,
+# with the first group selected by default.
+
+title: Homelab
+
+groups:
+  - name: Favourites
+    icon: https://raw.githubusercontent.com/…/favourites.png   # optional; URL icons download once
+    host: 192.168.1.5                                          # optional; shown in the panel header
+    items:
+      - name: Proxmox VE
+        url: https://192.168.1.5:8006
+        icon: https://raw.githubusercontent.com/…/proxmox-icon.svg
+        tags: [infra, hypervisor]
+
+  - name: System
+    items:
+      - name: Jellyfin
+        url: http://192.168.1.20:8096
+        tags: [media, video]
+        health:
+          path: /health
+          interval: 30s
+          degraded_after: 250ms   # answers slower than this show DEGRADED
+
+  - name: Server 1
+    host: 192.168.1.30
+    items:
+      - name: Example web UI
+        url: http://192.168.1.30:9000
+        tags: [app]
+        health:
+          path: /
+          interval: 60s
+
+  - name: Desktop (local)
+    # `run` items only work when the dashboard itself runs on that machine
+    # (not in Docker). The UI shows a confirm step before launching; only
+    # executables explicitly listed here can ever be started.
+    items:
+      - name: Steam
+        run: C:\Program Files (x86)\Steam\steam.exe
+        icon: steam.png   # any file placed in <config-dir>/resources/icons/
+        tags: [games, local]
+
+      - name: Notepad
+        run: notepad.exe
+        tags: [local]

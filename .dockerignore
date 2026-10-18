@@ -1,0 +1,5 @@
+.git
+*.exe
+dist/
+config.yml
+resources/

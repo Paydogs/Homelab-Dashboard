@@ -1,0 +1,28 @@
+# Homelab dashboard — deploy on Debian or a Windows machine with Docker.
+#
+# First run:
+#   cp config.example.yml config.yml   (edit services/tags to your lab)
+#   docker compose up -d --build
+#
+# Config is bind-mounted, never baked in: edit config.yml, refresh the
+# browser — no rebuild, no restart.
+
+services:
+  dashboard:
+    build: .
+    image: homelab-dashboard
+    container_name: homelab-dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yml:/config/config.yml
+      - ./resources:/config/resources   # downloaded URL icons are cached here
+    # environment:
+    #   TZ: Etc/UTC              # set your local timezone for health timestamps
+    # On Debian, if the icon cache fails to persist:
+    #   chown -R 1000:1000 resources/
+    # or run the container as your own uid:
+    # user: "1000:1000"
+    # `run:` items are disabled in Docker: executables live on the host,
+    # not in the container.

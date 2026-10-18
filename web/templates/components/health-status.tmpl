@@ -1,0 +1,5 @@
+<div class="health {{.Status}}" title="{{.Title}}"
+     hx-get="/health-status/{{.Key}}" hx-trigger="load, every 15s" hx-swap="outerHTML">
+  <span class="health-line"><span class="health-dot"></span>{{.Label}}</span>
+  <span class="health-latency">{{.Latency}}</span>
+</div>
