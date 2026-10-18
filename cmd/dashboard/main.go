@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"dashboard/internal/config"
 	"dashboard/internal/health"
 	"dashboard/internal/server"
+	"dashboard/internal/styles"
 )
 
 func main() {
@@ -28,8 +30,10 @@ func main() {
 		logger.Fatalf("loading config: %v", err)
 	}
 
+	styleMgr := styles.NewManager(filepath.Join(mgr.ResourcesDir(), "styles"), logger)
+
 	engine := health.New()
-	srv, err := server.New(mgr, engine, logger)
+	srv, err := server.New(mgr, engine, styleMgr, logger)
 	if err != nil {
 		logger.Fatalf("starting server: %v", err)
 	}

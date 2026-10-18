@@ -1,10 +1,12 @@
 // Package config loads and validates the dashboard YAML config and
-// re-reads it from disk when the file changes, without a rebuild or restart.
-// The schema types themselves live in the domain package.
+// re-reads it from disk when the file changes, without a rebuild or
+// restart. The tree schema types live in the domain package.
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -63,14 +65,16 @@ func (m *Manager) Get() *domain.Config {
 // ResourcesDir is the folder where URL icons are cached locally.
 func (m *Manager) ResourcesDir() string { return m.resPath }
 
-// RunService returns the service behind a key if that service is a local
-// runnable.
-func (m *Manager) RunService(key string) (domain.Service, bool) {
+// Path is the absolute location of the YAML file (for the web editor).
+func (m *Manager) Path() string { return m.path }
+
+// RunService returns the child behind a path key if it is a runnable App.
+func (m *Manager) RunService(key string) (domain.Child, bool) {
 	cfg := m.Get()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, svc, ok := cfg.FindService(key)
-	return svc, ok && svc.IsRunnable()
+	_, child, ok := cfg.FindService(key)
+	return child, ok && domain.IsRunnable(child)
 }
 
 // reloadLocked parses and validates the file and caches the result. Called
@@ -90,12 +94,10 @@ func (m *Manager) reloadLocked() error {
 	return nil
 }
 
-func parseFile(path string) (*domain.Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+// Parse validates config content in memory without touching the file on
+// disk — used by the web editor to preview changes before saving.
+func Parse(data []byte) (*domain.Config, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true) // fail on unknown YAML keys instead of silently ignoring typos
 	cfg := &domain.Config{}
 	if err := dec.Decode(cfg); err != nil {
@@ -107,50 +109,96 @@ func parseFile(path string) (*domain.Config, error) {
 	return cfg, nil
 }
 
+func parseFile(path string) (*domain.Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
+}
+
+// Save validates new config content and, only when it is good, atomically
+// replaces the YAML file on disk. The in-memory config is left alone: the
+// next render's Get() sees the new file metadata and reloads.
+func (m *Manager) Save(data []byte) error {
+	if _, err := Parse(data); err != nil {
+		return fmt.Errorf("config rejected, file unchanged: %w", err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tmp := m.path + ".tmp"
+	mode := fs.FileMode(0o644)
+	if st, err := os.Stat(m.path); err == nil {
+		mode = st.Mode()
+	}
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, m.path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("replacing config file: %w", err)
+	}
+	return nil
+}
+
 // validate enforces the invariants the UI and health engine rely on:
-// unique keys, exactly one of url/run per service, well-formed durations,
+// unique child paths across the whole tree, well-formed durations, and
 // healthchecks only on link services.
 func validate(c *domain.Config) error {
 	if c.Title == "" {
 		c.Title = "Homelab"
 	}
 	seen := map[string]bool{}
-	for _, g := range c.Groups {
-		if g.Name == "" {
-			return fmt.Errorf("every group needs a name")
+	var walk func(prefix string, g *domain.Group) error
+	walk = func(prefix string, g *domain.Group) error {
+		if g.Title == "" {
+			return fmt.Errorf("every group needs a title")
 		}
-		if len(g.Items) == 0 {
-			return fmt.Errorf("group %q has no items", g.Name)
+		path := g.Title
+		if prefix != "" {
+			path = prefix + "/" + g.Title
 		}
-		for i := range g.Items {
-			svc := &g.Items[i]
-			key := svc.Key(g.Name)
+		if len(g.Children) == 0 && len(g.Groups) == 0 {
+			return fmt.Errorf("group %q has no items or sub-groups", g.Title)
+		}
+		for _, ch := range g.Children {
+			key := domain.ChildPath(path, ch.Core().Title)
+			if ch.Core().Title == "" {
+				return fmt.Errorf("every item in group %q needs a title", g.Title)
+			}
 			if seen[key] {
-				return fmt.Errorf("duplicate item %q (group %q): items need unique names per group", svc.Name, g.Name)
+				return fmt.Errorf("duplicate item %q (under %q): item titles must be unique across the tree", ch.Core().Title, path)
 			}
 			seen[key] = true
-			if svc.Name == "" {
-				return fmt.Errorf("every item in group %q needs a name", g.Name)
-			}
-			if svc.IsLink() == svc.IsRunnable() {
-				return fmt.Errorf("item %q (group %q): set exactly one of `url` or `run`", svc.Name, g.Name)
-			}
-			if svc.URL != "" {
+
+			// Services are validated for URL shape and healthcheck specs;
+			// Apps (local runnable) carry neither by construction — the
+			// YAML discriminator already rejected url+run mixtures.
+			if svc, isService := ch.(*domain.Service); isService {
 				if _, err := url.Parse(strings.TrimSpace(svc.URL)); err != nil {
-					return fmt.Errorf("item %q (group %q): parsing url: %w", svc.Name, g.Name, err)
+					return fmt.Errorf("item %q: parsing url: %w", svc.Title, err)
+				}
+				if svc.Health != nil {
+					if _, err := svc.Health.IntervalD(); err != nil {
+						return fmt.Errorf("item %q: %v", svc.Title, err)
+					}
+					if _, err := svc.Health.DegradedD(); err != nil {
+						return fmt.Errorf("item %q: %v", svc.Title, err)
+					}
 				}
 			}
-			if svc.HasHealthCheck() {
-				if svc.URL == "" {
-					return fmt.Errorf("item %q (group %q): healthchecks need a `url` item", svc.Name, g.Name)
-				}
-				if _, err := svc.Health.IntervalD(); err != nil {
-					return fmt.Errorf("item %q (group %q): %v", svc.Name, g.Name, err)
-				}
-				if _, err := svc.Health.DegradedD(); err != nil {
-					return fmt.Errorf("item %q (group %q): %v", svc.Name, g.Name, err)
-				}
+		}
+		for i := range g.Groups {
+			if err := walk(path, &g.Groups[i]); err != nil {
+				return err
 			}
+		}
+		return nil
+	}
+	for i := range c.Groups {
+		if err := walk("", &c.Groups[i]); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -36,28 +36,29 @@ func (m *Manager) ensureIcons(cfg *domain.Config) {
 		return
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	for _, g := range cfg.Groups {
+	cfg.Walk(func(path string, g *domain.Group) {
 		if isURL(g.Icon) {
 			dest := filepath.Join(iconsDir, iconFilename(g.Icon))
 			if _, err := os.Stat(dest); err != nil {
 				if err := downloadIcon(client, g.Icon, dest); err != nil {
-					m.logger.Printf("downloading icon %s for group %q: %v", g.Icon, g.Name, err)
+					m.logger.Printf("downloading icon %s for group %q: %v", g.Icon, g.Title, err)
 				}
 			}
 		}
-		for _, it := range g.Items {
-			if !isURL(it.Icon) {
+		for _, ch := range g.Children {
+			icon := ch.Core().Icon
+			if !isURL(icon) {
 				continue
 			}
-			dest := filepath.Join(iconsDir, iconFilename(it.Icon))
+			dest := filepath.Join(iconsDir, iconFilename(icon))
 			if _, err := os.Stat(dest); err == nil {
 				continue
 			}
-			if err := downloadIcon(client, it.Icon, dest); err != nil {
-				m.logger.Printf("downloading icon %s for %q: %v", it.Icon, it.Name, err)
+			if err := downloadIcon(client, icon, dest); err != nil {
+				m.logger.Printf("downloading icon %s for %q: %v", icon, ch.Core().Title, err)
 			}
 		}
-	}
+	})
 }
 
 // ResolveIcon maps an item's `icon` field to a URL the template can use for

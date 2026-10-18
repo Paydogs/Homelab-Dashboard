@@ -5,11 +5,13 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+
+	"dashboard/domain"
 )
 
-// run launches a local runnable config item. It is a security boundary:
+// run launches a locally runnable App child. It is a security boundary:
 // only callers from the dashboard's own machine may launch anything, only
-// executables explicitly listed in the YAML can ever be spawned, and the
+// executables explicitly listed in the config can ever be spawned, and the
 // UI's confirm step precedes the request.
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	if !isLocal(r) {
@@ -17,20 +19,22 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	item, ok := s.cfg.RunService(key)
+	child, ok := s.cfg.RunService(key)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	cmd := exec.Command(item.Run) //nolint:gosec,pathcheck // path comes from the local config file, never from the request
+	app := child.(*domain.App)
+	path := app.Run
+	cmd := exec.Command(path) //nolint:gosec,pathcheck // path comes from the local config file, never from the request
 	if err := cmd.Start(); err != nil {
-		s.logger.Printf("starting %s (%s): %v", item.Name, item.Run, err)
-		http.Error(w, fmt.Sprintf("failed to start %s: %v", item.Name, err), http.StatusInternalServerError)
+		s.logger.Printf("starting %s (%s): %v", app.Title, path, err)
+		http.Error(w, fmt.Sprintf("failed to start %s: %v", app.Title, err), http.StatusInternalServerError)
 		return
 	}
-	s.logger.Printf("launched %s (%s)", item.Name, item.Run)
+	s.logger.Printf("launched %s (%s)", app.Title, path)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "started %s", item.Name)
+	fmt.Fprintf(w, "started %s", app.Title)
 }
 
 // isLocal reports whether the request arrived from the dashboard host

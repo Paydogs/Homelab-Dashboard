@@ -81,24 +81,137 @@
   tick();
   setInterval(tick, 1000);
 
-  /* ---- style picker (accent themes, persisted per browser) ---- */
+  /* ---- style picker (themes served from resources/styles, persisted per browser) ---- */
 
+  // The stored record keeps the style AND the config default it was chosen
+  // under: when the config's defaultStyle changes, browsers adopt the new
+  // default on their next refresh instead of staying on an old pick.
   var STYLE_KEY = "dashboard.style";
   var select = document.getElementById("style-select");
   if (select) {
-    try {
-      var saved = localStorage.getItem(STYLE_KEY);
-      if (saved) select.value = saved;
-    } catch (e) { /* ignore */ }
-    applyStyle(select.value);
+    var current = resolvedStyle();
+    applyStyle(current);
+    select.value = current; // the picker always shows what is applied
     select.addEventListener("change", function () {
       applyStyle(select.value);
-      try { localStorage.setItem(STYLE_KEY, select.value); } catch (e) { /* ignore */ }
+      try {
+        localStorage.setItem(STYLE_KEY, JSON.stringify({ style: select.value, under: configDefault() }));
+      } catch (e) { /* ignore */ }
     });
   }
 
+  function configDefault() { return select.dataset["default"] || select.value; }
+
+  function optionExists(id) {
+    for (var i = 0; i < select.options.length; i++) {
+      if (select.options[i].value === id) return true;
+    }
+    return false;
+  }
+
+  // resolvedStyle: the viewer's saved pick when still valid AND chosen
+  // under the same config default; otherwise the config's current default.
+  function resolvedStyle() {
+    var fallback = configDefault();
+    try {
+      var rec = JSON.parse(localStorage.getItem(STYLE_KEY) || "null");
+      if (rec && rec.style && optionExists(rec.style) && rec.under === fallback) {
+        return rec.style;
+      }
+    } catch (e) { /* ignore */ }
+    return fallback;
+  }
+
   function applyStyle(style) {
-    document.documentElement.dataset.style = style || "retro";
+    if (style) document.documentElement.dataset.style = style;
+  }
+
+  /* ---- editors: config (single pane) + style (base | overrides) ---- */
+
+  var overlay = document.getElementById("edit-overlay");
+  var editTitle = document.getElementById("edit-title");
+  var singleBody = document.getElementById("edit-single");
+  var splitBody = document.getElementById("edit-split");
+  var textarea = document.getElementById("edit-textarea");
+  var baseTextarea = document.getElementById("edit-base");
+  var overTextarea = document.getElementById("edit-overwrite");
+  var saveBtn = document.getElementById("edit-save");
+  var editError = document.getElementById("edit-error");
+  var editing = null; // {saveUrl, body}
+
+  function openEditor(title, single, loadBody) {
+    editTitle.textContent = title;
+    singleBody.classList.toggle("hidden", !single);
+    splitBody.classList.toggle("hidden", single);
+    editError.textContent = "";
+    saveBtn.disabled = true;
+    overlay.hidden = false;
+    loadBody();
+  }
+
+  function loadText(url, fill) {
+    return fetch(url)
+      .then(function (res) { return res.text(); })
+      .then(fill)
+      .catch(function (err) { editError.textContent = String(err.message || err); });
+  }
+
+  if (overlay) {
+    document.getElementById("edit-config-btn").addEventListener("click", function () {
+      editing = { split: false, saveUrl: "/config-source" };
+      openEditor("Edit config.yml", true, function () {
+        textarea.value = "loading…";
+        loadText("/config-source", function (text) { textarea.value = text; saveBtn.disabled = false; });
+      });
+    });
+
+    document.getElementById("edit-style-btn").addEventListener("click", function () {
+      var styleId = document.getElementById("style-select").value || "retro";
+      var styleName = document.getElementById("style-select").selectedOptions[0] ?
+        document.getElementById("style-select").selectedOptions[0].textContent : styleId;
+      editing = { split: true, saveUrl: "/style-source/" + encodeURIComponent(styleId) + "/overwrite" };
+      openEditor("Edit style: " + styleName + "  (" + styleId + ")", false, function () {
+        baseTextarea.value = "loading…";
+        overTextarea.value = "loading…";
+        loadText("/style-source/" + encodeURIComponent(styleId) + "/base",
+          function (text) { baseTextarea.value = text.replace(/^# original.*\n/, ""); });
+        loadText("/style-source/" + encodeURIComponent(styleId) + "/overwrite",
+          function (text) { overTextarea.value = text.replace(/^# Operator.*\n# here\.\n?/, ""); saveBtn.disabled = false; });
+      });
+    });
+
+    document.getElementById("edit-close").addEventListener("click", function () {
+      overlay.hidden = true;
+    });
+
+    saveBtn.addEventListener("click", function () {
+      editError.textContent = "";
+      var body = editing.split ? overTextarea.value : textarea.value;
+      fetch(editing.saveUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/yaml" },
+        body: body
+      })
+        .then(function (res) {
+          return res.text().then(function (text) {
+            if (!res.ok) {
+              // validation errors carry line numbers from the YAML parser
+              editError.textContent = text.replace(/^.*: /, "");
+              return;
+            }
+            overlay.hidden = true;
+            toast(editing.split ? "style saved — reloading" : "config saved — reloading", "");
+            setTimeout(function () { window.location.reload(); }, 600);
+          });
+        })
+        .catch(function (err) {
+          editError.textContent = String(err.message || err);
+        });
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !overlay.hidden) overlay.hidden = true;
+    });
   }
 
   /* ---- run items ---- */

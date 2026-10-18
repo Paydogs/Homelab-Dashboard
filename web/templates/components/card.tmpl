@@ -4,13 +4,14 @@
   </div>
   <div class="row-main">
     <div class="row-title">
-      {{if .URL}}
+      {{if eq .Kind "service"}}
         <a href="{{.URL}}" target="_blank" rel="noopener">{{.Name}}</a>
       {{else}}
         <span>{{.Name}}</span>
       {{end}}
     </div>
-    {{if .URL}}<div class="row-url">{{.URL}}</div>{{end}}
+    {{with .Subtitle}}<div class="row-url">{{.}}</div>{{end}}
+    {{if not .Subtitle}}{{with .URL}}<div class="row-url">{{.}}</div>{{end}}{{end}}
     {{if .Tags}}
     <div class="row-tags">
       {{range .Tags}}<span class="tag-chip">{{.}}</span>{{end}}
@@ -20,7 +21,7 @@
   <div class="row-status">
     {{if .Health}}
       {{with .Health}}{{template "components/health-status.tmpl" .}}{{end}}
-    {{else if .Run}}
+    {{else if eq .Kind "app"}}
       <div class="run" x-data="{open: false}" @keydown.escape="open = false">
         <button class="btn-run" type="button" @click="open = true">run…</button>
         <div class="confirm" x-show="open" x-cloak>

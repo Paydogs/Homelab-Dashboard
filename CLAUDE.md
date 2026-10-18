@@ -26,9 +26,12 @@ opens them fast, and monitors their health. Technical direction follows projects
 ## UI design (reference: `Examples/*.pdf`, the "Control" mockup)
 
 - **Masthead block:** `TITLE // CONTROL` eyebrow, big live clock (HH:MM + small seconds, date
-  line below), the **style picker** (accent theme select on the right), and stats columns
-  (`SERVICES up/total`, `HOSTS = number of groups`, `ALERTS = degraded + offline count`).
-  Stats are an htmx fragment (`GET /summary`, refreshed on a timer).
+  line below), on the right: the **edit config button** (opens an overlay with the raw config.yml
+  in a textarea; Save validates server-side and atomic-replaces the file — invalid YAML is
+  rejected with the parser's line numbers and the file is untouched; localhost-only), the **style
+  picker** (accent theme select), and stats columns (`SERVICES up/total`, `HOSTS = number of
+  groups`, `ALERTS = degraded + offline count`). Stats are an htmx fragment (`GET /summary`,
+  refreshed on a timer).
 - **Filter row:** search box (matches **name, tags, url/ip**) + tag chips (`all` + every distinct
   tag). Search/tag filtering covers all panels at once; empty panels hide while filtering.
 - **Panel grid:** one panel per group (2-col responsive grid). Panel header: group icon box,
@@ -37,13 +40,41 @@ opens them fast, and monitors their health. Technical direction follows projects
 - **Service rows** inside each panel: icon, name (link) + url line, tag chips; right side: health
   status block (dot + ONLINE/DEGRADED/OFFLINE label + latency, self-refreshing htmx fragment,
   `GET /health-status/{key}`) or the `run…` confirm button for local executables.
-- Colors: Resurrect 64 palette only; monospace type throughout.
+- **Styles (themes) are files, never code:** the only source of styles is `<config-dir>/resources/
+  styles/` — **one subfolder per style**, holding `style.yml` plus any files it references.
+  `style.yml` has `name`, optional `font:` / `titleFont:` (paths relative to the style folder —
+  font files you drop in there; a missing file or a failed load defaults to **Arial**), optional
+  `fontSize:` (sets the root font size — the rem-based UI scales with it) and `titleFontSize:`
+  (page title only), and `colors` mapping CSS tokens → values (values may be any CSS expression,
+  e.g. `color-mix(...)`).
+  Currently shipped: `modern/` (indigo ink, `titleFont: DIGITAL TIMELESS DEMO.ttf` — demo
+  license, personal use) and `retro/` (warm plum). Font files are served at `/fonts/<id>/<path>`
+  (sanitized: style id + no traversal); a style without a font ref inherits the mono token stack;
+  `main.css`'s `:root` tokens are the base fallback when the folder is empty.
 
 ## Architecture
 
-- `domain/` — the domain models (Config, Group, Service, HealthCheck, Status, ProbeResult) live
-  here, imported by config, health and server instead of each redefining shapes. Presentation
-  projections (ItemView/GroupView/…) stay in the server package.
+- `domain/` — the domain models live here and are instantiated by the other packages: the content
+  **tree** (Config → Groups → children), the child kinds (Service, App), the health state models
+  (Status, ProbeResult) and the HealthCheck spec. config, health and server import these types
+  instead of redefining shapes. Presentation projections (ItemView/GroupView/…) stay in the
+  server package.
+
+## Domain model (the data layer)
+
+- **Group (parent node):** `title`, optional `subtitle`, `icon`, `host`, plus `[groups]` and
+  `[items]`. Groups hold other groups (parents) and items (children) — a recursive tree.
+- **Child (end leaf) = Service | App**, both sharing a `Leaf` base: `title`, optional
+  `subtitle`, `url` (service/link), `icon`, `[tags]`, and a runtime `status` (set from health
+  probes at render time, not stored in YAML).
+  - **Service:** a `url` opened in a browser tab; may carry a `health` block
+    (`path`, `interval`, `degraded_after`).
+  - **App:** a local executable (`run`) launched by the dashboard host behind a confirm step;
+    no healthcheck.
+- YAML: `items` entries are discriminated by the presence of `url` (Service) or `run` (App);
+  both at once, neither, or a healthcheck on a run item are validation errors. Child keys are
+  their tree path: `Servers/Server 1/Gitea` (used for health targets, the run endpoint and the
+  htmx fragments — routes use `{key...}` wildcards).
 
 ## Scope by iteration
 
@@ -53,7 +84,9 @@ opens them fast, and monitors their health. Technical direction follows projects
 - **v2:** Proxmox integration — VM/container status (running/stopped, CPU/mem at a glance) from the
   Proxmox API. Also more widget types (Docker, network, etc.) as needed.
 - **v3:** Web UI editing that writes back to the YAML file (config stays the source of truth).
-  Not required now — the user edits the YAML in an editor.
+  A first slice already ships: the masthead edit button round-trips the raw YAML
+  (`GET/POST /config-source`, validate-then-atomic-write via `Manager.Save`). Still open:
+  structured editing (forms per group/child) instead of the raw textarea.
 
 No service auto-discovery: every entry is hand-configured in YAML.
 
@@ -85,33 +118,36 @@ UI files live in the separate `web/` folder, structured **component by component
 piece of UI (card, tag, search bar, group) is its own template file, composed into pages — keep
 new UI as small component templates rather than monolithic page markup.
 
-## Config (v1 sketch)
+## Config (sketch)
 
 Single YAML file, path given by flag/env (default `config.yml`). Structure roughly:
 
 ```yaml
 title: Homelab
-groups:                        # a page can have many groups
-  - name: Media
-    items:
-      - name: Jellyfin           # links open in a new browser tab
-        url: http://media.lan:8096
-        icon: jellyfin           # optional; built-in icon name or raw URL
-                                 # URL icons are downloaded once to a local resources folder
-        tags: [media, video]     # v1 feature: shown on the card, filter/search on tags
-        health:                  # optional; omit = no healthcheck
-          path: /health
-          interval: 60s
-      - name: Steam
-        run: C:\Program Files (x86)\Steam\steam.exe   # local runnable (Windows)
+groups:                          # a recursive tree of panels
+  - title: Servers               # group: title, optional subtitle/icon/host
+    groups:
+      - title: Server 1
+        host: 192.168.1.30       # optional; shown in the panel header
+        items:
+          - title: Gitea         # a Service (leaf): a link opened in the browser
+            url: http://192.168.1.30:3000
+            icon: …              # optional; URL icons download once to resources/icons/
+            tags: [dev]          # shown on the row, filter/search over tags, url, name
+            health:              # optional; omit = no healthcheck
+              path: /            # omitted path = probe the root
+              interval: 60s      # default 60s
+              degraded_after: 250ms  # slower answers show DEGRADED instead of ONLINE
+          - title: Steam         # an App (leaf): launched on the dashboard host
+            run: C:\Program Files (x86)\Steam\steam.exe
 ```
 
-Two item kinds:
+Leaf kinds (validated: exactly one of `url`/`run`; no healthchecks on run items):
 
-- **`url` items** — plain links, opened in a new tab. Cover remote services on other VMs.
-- **`run` items** — the server launches a locally installed executable (Windows path). It does not
-  need to run instantly: clicking shows a **confirm step** ("Run Steam?") before the server spawns
-  the process. Only meaningful when the dashboard runs on that machine; hidden or refused elsewhere.
+- **Service** — plain link, opened in a new tab. Cover remote services on other VMs.
+- **App** — the server launches a locally installed executable (Windows path). It does not
+  need to run instantly: clicking shows a **confirm step** ("Run Steam?") before the server
+  spawns the process. Only meaningful when the dashboard runs on that machine; refused elsewhere.
 
 Keep the schema minimal and validated at startup — **fail fast with a useful error** (file + line)
 on bad config.

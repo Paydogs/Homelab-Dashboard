@@ -6,6 +6,7 @@
 <title>{{.Title}}</title>
 <link rel="icon" href="/static/icons/globe.svg">
 <link rel="stylesheet" href="/static/css/main.css">
+<style>{{.StylesCSS}}</style>
 <script src="/static/vendor/htmx.min.js" defer></script>
 <script src="/static/vendor/alpine.min.js" defer></script>
 <script src="/static/js/ui.js" defer></script>
@@ -13,22 +14,37 @@
 <body>
 
 <header class="masthead">
-  <div class="masthead-left">
-    <div class="eyebrow">{{.Title}} // control</div>
-    <div class="clock">
-      <span id="clock-time">--:--</span><span class="clock-seconds" id="clock-seconds">00</span>
+  <div class="masthead-top">
+    <div class="eyebrow masthead-title">{{.Title}}</div>
+    <div class="masthead-tools">
+      <label class="style-picker">
+        <select id="style-select" aria-label="style" data-default="{{.DefaultStyle}}">
+          {{range .Styles}}<option value="{{.ID}}"{{if eq .ID $.DefaultStyle}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <button id="edit-style-btn" class="edit-btn" type="button" title="Edit the current style (base + overrides)" aria-label="Edit style">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4a7.7 7.7 0 1 0 .6 15.4L21 19a1 1 0 0 0 .8-1.4L13.6 4.7A3 3 0 0 0 11 4Z"/>
+          <circle cx="8.5" cy="11.5" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="11" cy="14" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button id="edit-config-btn" class="edit-btn" type="button" title="Edit config.yml directly" aria-label="Edit config">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/>
+          <path d="M13.5 6.5l3 3"/>
+        </svg>
+      </button>
     </div>
-    <div class="clock-date" id="clock-date"></div>
   </div>
-  <div class="masthead-right">
-    <label class="style-picker">
-      <select id="style-select" aria-label="style">
-        <option value="retro">Retro</option>
-        <option value="teal">Teal</option>
-        <option value="ember">Ember</option>
-      </select>
-    </label>
-    <div class="masthead-stats" hx-get="/summary" hx-trigger="every 15s" hx-swap="outerHTML">
+  <div class="masthead-blocks">
+    <div class="mblock clock-block">
+      <div class="clock">
+        <span id="clock-time">--:--</span><span class="clock-seconds" id="clock-seconds">00</span>
+      </div>
+      <div class="clock-date" id="clock-date"></div>
+    </div>
+    <div class="masthead-stats" hx-get="/summary" hx-trigger="every 15s" hx-swap="innerHTML">
       {{template "summary.tmpl" .Summary}}
     </div>
   </div>
@@ -50,5 +66,40 @@
 </main>
 
 <div id="toast-stack" class="toast-stack"></div>
+
+<div id="edit-overlay" class="overlay" hidden>
+  <div class="overlay-panel">
+    <div class="overlay-head">
+      <span class="eyebrow" id="edit-title">Edit config.yml</span>
+      <button id="edit-close" class="edit-btn" type="button" title="Close (Esc)" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="overlay-body" id="edit-single">
+      <textarea id="edit-textarea" spellcheck="false" wrap="off"></textarea>
+    </div>
+    <div class="overlay-body split hidden" id="edit-split">
+      <div class="pane">
+        <div class="pane-label"><span class="eyebrow" id="pane-base-label">base</span><span class="pane-note">read-only</span></div>
+        <textarea id="edit-base" spellcheck="false" wrap="off" readonly></textarea>
+      </div>
+      <div class="pane">
+        <div class="pane-label"><span class="eyebrow" id="pane-over-label">overrides</span><span class="pane-note">edit only what changes</span></div>
+        <textarea id="edit-overwrite" spellcheck="false" wrap="off"></textarea>
+      </div>
+    </div>
+    <div class="overlay-foot">
+      <span id="edit-error" class="edit-error" role="alert"></span>
+      <button id="edit-save" class="edit-btn" type="button" title="Save" aria-label="Save">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/>
+          <path d="M17 21v-8H7v8M7 3v5h8"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

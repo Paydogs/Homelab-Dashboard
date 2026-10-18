@@ -14,21 +14,24 @@ import (
 
 	"dashboard/internal/config"
 	"dashboard/internal/health"
+	"dashboard/internal/styles"
 	"dashboard/web"
 )
 
-// Server owns the parsed templates plus the config and health managers.
+// Server owns the parsed templates plus the config, health and styles
+// managers.
 type Server struct {
 	ctx    context.Context
 	cfg    *config.Manager
 	eng    *health.Engine
+	styles *styles.Manager
 	logger *log.Logger
 	tmpl   *template.Template
 }
 
 // New parses the embedded templates once. Template changes therefore need a
-// restart, but config changes never do.
-func New(cfg *config.Manager, eng *health.Engine, logger *log.Logger) (*Server, error) {
+// restart, but config and style changes never do.
+func New(cfg *config.Manager, eng *health.Engine, styleMgr *styles.Manager, logger *log.Logger) (*Server, error) {
 	funcs := template.FuncMap{
 		"join":  strings.Join,
 		"lower": strings.ToLower,
@@ -55,7 +58,7 @@ func New(cfg *config.Manager, eng *health.Engine, logger *log.Logger) (*Server, 
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{ctx: context.Background(), cfg: cfg, eng: eng, logger: logger, tmpl: root}
+	s := &Server{ctx: context.Background(), cfg: cfg, eng: eng, styles: styleMgr, logger: logger, tmpl: root}
 	s.syncHealth(cfg.Get())
 	return s, nil
 }
@@ -65,9 +68,14 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /summary", s.summary)
-	mux.HandleFunc("GET /health-status/{key}", s.healthStatus)
-	mux.HandleFunc("POST /run/{key}", s.run)
+	mux.HandleFunc("GET /config-source", s.configSource)
+	mux.HandleFunc("POST /config-source", s.saveConfig)
+	mux.HandleFunc("GET /style-source/{id}/{part}", s.styleSource)
+	mux.HandleFunc("POST /style-source/{id}/overwrite", s.saveStyle)
+	mux.HandleFunc("GET /health-status/{key...}", s.healthStatus)
+	mux.HandleFunc("POST /run/{key...}", s.run)
 	mux.Handle("GET /static/", staticHandler())
+	mux.HandleFunc("GET /fonts/{id}/{file...}", s.styleFont)
 	mux.Handle("GET /resources/", http.StripPrefix("/resources/",
 		http.FileServer(http.Dir(s.cfg.ResourcesDir()))))
 	return logRequests(s.logger, mux)

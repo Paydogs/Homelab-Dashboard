@@ -2,52 +2,70 @@
 # Copy to config.yml (next to where the dashboard runs) and edit freely:
 # a browser refresh is enough, no rebuild or restart needed.
 #
-# The design expects groups like: Favourites, System, Proxmox, Arcane,
-# Server 1 … — the left-column blocks follow your config's group order,
-# with the first group selected by default.
+# The content is a tree. Groups are parents — each one can hold more
+# `groups` (sub-panels) and `items` (the children). Children are the end
+# leafs; each item is either a Service (a `url`, opened in the browser) or
+# an App (a `run`, launched on the dashboard's own machine after a confirm).
+# The first group's panels follow your config's order.
 
 title: Homelab
 
+# the style selected on first visit — a resources/styles folder name;
+# a viewer's own pick is remembered in the browser. If the name is not
+# found the first folder is used.
+defaultStyle: modern
+
 groups:
-  - name: Favourites
-    icon: https://raw.githubusercontent.com/…/favourites.png   # optional; URL icons download once
+  - title: Favourites
+    icon: https://raw.githubusercontent.com/…/favourites.png   # optional
     host: 192.168.1.5                                          # optional; shown in the panel header
     items:
-      - name: Proxmox VE
+      - title: Proxmox VE
+        subtitle: hypervisor
         url: https://192.168.1.5:8006
         icon: https://raw.githubusercontent.com/…/proxmox-icon.svg
-        tags: [infra, hypervisor]
+        tags: [infra, virt]
 
-  - name: System
-    items:
-      - name: Jellyfin
-        url: http://192.168.1.20:8096
-        tags: [media, video]
-        health:
-          path: /health
-          interval: 30s
-          degraded_after: 250ms   # answers slower than this show DEGRADED
-
-  - name: Server 1
-    host: 192.168.1.30
-    items:
-      - name: Example web UI
-        url: http://192.168.1.30:9000
-        tags: [app]
+      - title: Pi-hole
+        url: http://192.168.1.10/admin
+        tags: [network, dns]
         health:
           path: /
-          interval: 60s
+          interval: 30s
 
-  - name: Desktop (local)
+  - title: Servers
+    groups:
+      - title: Server 1
+        host: 192.168.1.30
+        items:
+          - title: Gitea
+            url: http://192.168.1.30:3000
+            tags: [dev]
+            health:
+              path: /
+              interval: 60s
+              degraded_after: 250ms   # answers slower than this show DEGRADED
+
+      - title: Server 2
+        host: 192.168.1.31
+        items:
+          - title: Jellyfin
+            url: http://192.168.1.31:8096
+            tags: [media]
+            health:
+              path: /health
+              interval: 30s
+
+  - title: Desktop (local)
     # `run` items only work when the dashboard itself runs on that machine
     # (not in Docker). The UI shows a confirm step before launching; only
     # executables explicitly listed here can ever be started.
     items:
-      - name: Steam
+      - title: Steam
         run: C:\Program Files (x86)\Steam\steam.exe
         icon: steam.png   # any file placed in <config-dir>/resources/icons/
         tags: [games, local]
 
-      - name: Notepad
+      - title: Notepad
         run: notepad.exe
         tags: [local]

@@ -3,7 +3,8 @@
     <img class="panel-icon" src="{{.Icon}}" alt="" loading="lazy">
     <div class="panel-id">
       <h2>{{.Name}}</h2>
-      {{if .Host}}<div class="panel-host">{{.Host}}</div>{{end}}
+      {{with .Subtitle}}<div class="panel-host">{{.}}</div>{{end}}
+      {{if not .Subtitle}}{{with .Host}}<div class="panel-host">{{.}}</div>{{end}}{{end}}
     </div>
     <div class="panel-state">
       <div class="panel-fraction">{{.Fraction}}</div>
