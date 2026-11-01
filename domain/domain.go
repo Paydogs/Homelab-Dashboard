@@ -25,6 +25,10 @@ type HealthCheck struct {
 	Path          string `yaml:"path,omitempty"`
 	Interval      string `yaml:"interval,omitempty"`
 	DegradedAfter string `yaml:"degraded_after,omitempty"`
+	// Disabled turns the check off without losing its settings (maintenance,
+	// seasonal services, …): nothing is probed and the row shows no status,
+	// exactly as if the health block were omitted.
+	Disabled bool `yaml:"disabled,omitempty"`
 }
 
 // IntervalD returns the parsed probe interval (the D suffix avoids clashing

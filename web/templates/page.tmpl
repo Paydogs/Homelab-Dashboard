@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
 <link rel="icon" href="/static/icons/globe.svg">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="description" content="Homelab dashboard — services, health and quick links">
+<meta name="theme-color" content="#2e222f">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="/static/css/main.css">
 <style>{{.StylesCSS}}</style>
 <script src="/static/vendor/htmx.min.js" defer></script>
@@ -22,6 +27,13 @@
           {{range .Styles}}<option value="{{.ID}}"{{if eq .ID $.DefaultStyle}} selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>
+      {{if .CanOpenFolder}}
+      <button id="open-data-btn" class="edit-btn" type="button" title="Data folder — show, open, or change" aria-label="Data folder">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>
+        </svg>
+      </button>
+      {{end}}
       {{if .CanEdit}}
       <button id="edit-style-btn" class="edit-btn" type="button" title="Edit the current style (base + overrides)" aria-label="Edit style">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -52,6 +64,13 @@
   </div>
 </header>
 
+{{if .ConfigError}}
+<div class="config-error" role="alert">
+  <span class="eyebrow">Config error</span>
+  <span class="config-error-text">{{.ConfigError}}</span>
+</div>
+{{end}}
+
 <section class="filter-row" aria-label="filter">
   <span class="eyebrow">Filter</span>
   <input id="search" class="search" type="search"
@@ -62,7 +81,7 @@
   </div>
 </section>
 
-<div class="frame">
+<div class="frame{{if .CardCols}} has-cards{{end}}">
   <aside class="sidebar">
     {{if .Sidebar}}
     {{template "groups-list.tmpl" .Sidebar}}
@@ -70,6 +89,20 @@
     <p class="empty">No groups configured — edit <code>config.yml</code> and refresh.</p>
     {{end}}
   </aside>
+
+  {{range $i, $col := .CardCols}}
+  <nav class="group-cards{{if ne $i 0}} hidden{{end}}" data-root="{{$col.Root}}" aria-label="sub-groups of {{$col.Root}}">
+    {{range $col.Cards}}
+    <button class="group-item" data-path="{{.Path}}" type="button">
+      <span class="group-item-name">{{.Name}} <span class="group-item-total">· {{.Total}}</span></span>
+      <span class="group-item-counts">
+        {{if .OK}}<span class="count ok">{{.OK}} ok</span>{{end}}
+        {{if .Error}}<span class="count err">{{.Error}} err</span>{{end}}
+      </span>
+    </button>
+    {{end}}
+  </nav>
+  {{end}}
 
   <main class="panel">
     {{range .Panels}}
@@ -83,14 +116,9 @@
           <div class="panel-fraction">{{.Fraction}}</div>
         </div>
       </header>
-      {{if .Tiles}}
-      <div class="tiles">
-        {{range .Tiles}}{{template "components/group-tile.tmpl" .}}{{end}}
-      </div>
-      {{end}}
       <div class="rows">
         {{range .Items}}{{template "components/card.tmpl" .}}{{end}}
-        {{if not .Items}}{{if not .Tiles}}<div class="row-empty">no services yet</div>{{end}}{{end}}
+        {{if not .Items}}<div class="row-empty">no services yet</div>{{end}}
       </div>
     </section>
     {{end}}
@@ -130,6 +158,29 @@
           <path d="M17 21v-8H7v8M7 3v5h8"/>
         </svg>
       </button>
+    </div>
+  </div>
+</div>
+
+<div id="data-overlay" class="overlay" hidden>
+  <div class="overlay-panel data-panel">
+    <div class="overlay-head">
+      <span class="eyebrow">Data folder</span>
+      <button id="data-close" class="edit-btn" type="button" title="Close (Esc)" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="overlay-body data-body">
+      <input id="data-path" type="text" spellcheck="false" placeholder="folder holding config.yml + resources/">
+      <p class="pane-note">The folder is created when missing and seeded with the sample config + starter
+      styles when empty. The choice applies right away and is remembered on the next launch.</p>
+    </div>
+    <div class="overlay-foot">
+      <span id="data-error" class="edit-error" role="alert"></span>
+      <button id="data-open" class="btn-header" type="button">Open folder</button>
+      <button id="data-set" class="btn-header" type="button">Use this folder</button>
     </div>
   </div>
 </div>

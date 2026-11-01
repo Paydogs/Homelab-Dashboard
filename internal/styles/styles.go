@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"dashboard/domain"
 	"gopkg.in/yaml.v3"
@@ -29,6 +30,7 @@ const fontFallback = `"Arial", sans-serif`
 // Manager owns the styles folder. No styles are embedded in the code —
 // the folder's contents are the single source of truth.
 type Manager struct {
+	mu     sync.RWMutex
 	dir    string
 	logger *log.Logger
 }
@@ -43,6 +45,18 @@ func NewManager(stylesDir string, logger *log.Logger) *Manager {
 	return m
 }
 
+// Retarget switches the manager to another styles folder — used when the
+// data folder changes at runtime (the styles live under its resources/).
+// The folder is read on every request, so the switch takes effect at once.
+func (m *Manager) Retarget(stylesDir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dir = stylesDir
+	if err := os.MkdirAll(stylesDir, 0o755); err != nil {
+		m.logger.Printf("creating styles dir: %v", err)
+	}
+}
+
 // All scans the folder for styles — one subfolder per style, holding a
 // style.yml (or <name>.yml) plus any files the config references (fonts,
 // relative to the style folder). A legacy single *.yml at the top level is
@@ -50,7 +64,10 @@ func NewManager(stylesDir string, logger *log.Logger) *Manager {
 // empty folder simply yields no styles, and the page falls back to the
 // base tokens in main.css.
 func (m *Manager) All() []domain.Style {
-	entries, err := os.ReadDir(m.dir)
+	m.mu.RLock()
+	dir := m.dir
+	m.mu.RUnlock()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		m.logger.Printf("reading styles dir: %v", err)
 	}
@@ -59,9 +76,9 @@ func (m *Manager) All() []domain.Style {
 		name := e.Name()
 		if e.IsDir() {
 			for _, cfgName := range []string{"style.yml", "style.yaml", name + ".yml", name + ".yaml"} {
-				path := filepath.Join(m.dir, name, cfgName)
+				path := filepath.Join(dir, name, cfgName)
 				if data, err := os.ReadFile(path); err == nil {
-					if s, ok := m.loadStyle(data, filepath.Join(m.dir, name), strings.ToLower(name)); ok {
+					if s, ok := m.loadStyle(data, filepath.Join(dir, name), strings.ToLower(name)); ok {
 						out = append(out, s)
 					}
 					break
@@ -73,13 +90,13 @@ func (m *Manager) All() []domain.Style {
 			continue
 		}
 		// legacy flat file; folder for font refs is the styles root
-		data, err := os.ReadFile(filepath.Join(m.dir, name))
+		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			m.logger.Printf("reading style %s: %v", name, err)
 			continue
 		}
 		id := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(name, ".yaml"), ".yml"))
-		if s, ok := m.loadStyle(data, m.dir, id); ok {
+		if s, ok := m.loadStyle(data, dir, id); ok {
 			out = append(out, s)
 		}
 	}

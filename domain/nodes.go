@@ -22,7 +22,11 @@ type Leaf struct {
 	URL      string   `yaml:"url,omitempty"` // opened in a browser tab
 	Icon     string   `yaml:"icon,omitempty"`
 	Tags     []string `yaml:"tags,omitempty"`
-	Status   Status   `yaml:"-"` // runtime state, merged in at render time
+	// Private marks a service presenting a private/self-signed certificate
+	// (Proxmox, router UIs, …): its healthcheck dismisses TLS verification
+	// instead of showing a permanent OFFLINE. Only meaningful with health:.
+	Private bool   `yaml:"private,omitempty"`
+	Status  Status `yaml:"-"` // runtime state, merged in at render time
 }
 
 // Child is one end leaf of the tree (a Service or an App).
@@ -241,6 +245,9 @@ func (l *ChildList) UnmarshalYAML(value *yaml.Node) error {
 			if probe.URL == "" {
 				return fmt.Errorf("service %q: needs a `url:`", title)
 			}
+			if probe.Leaf.Private && probe.Health == nil {
+				return fmt.Errorf("service %q: `private:` tunes the healthcheck (dismiss TLS verification) — add a `health:` block or drop `private:`", title)
+			}
 			items = append(items, &Service{Leaf: probe.Leaf, Health: probe.Health})
 
 		// `- app:` — must be a local executable
@@ -254,6 +261,9 @@ func (l *ChildList) UnmarshalYAML(value *yaml.Node) error {
 			if probe.Health != nil {
 				return fmt.Errorf("app %q: healthchecks only apply to `url:` (service) children", title)
 			}
+			if probe.Leaf.Private {
+				return fmt.Errorf("app %q: `private:` only applies to `url:` (service) children", title)
+			}
 			items = append(items, &App{Leaf: probe.Leaf, Run: probe.Run})
 
 		// plain `- title:` — discriminate by url/run as before
@@ -263,6 +273,10 @@ func (l *ChildList) UnmarshalYAML(value *yaml.Node) error {
 				return fmt.Errorf("child %q: set either `url:` (service) or `run:` (app) — not both", title)
 			case probe.Run != "" && probe.Health != nil:
 				return fmt.Errorf("child %q: healthchecks only apply to `url:` (service) children", title)
+			case probe.Run != "" && probe.Leaf.Private:
+				return fmt.Errorf("child %q: `private:` only applies to `url:` (service) children", title)
+			case probe.URL != "" && probe.Leaf.Private && probe.Health == nil:
+				return fmt.Errorf("child %q: `private:` tunes the healthcheck (dismiss TLS verification) — add a `health:` block or drop `private:`", title)
 			case probe.URL != "":
 				items = append(items, &Service{Leaf: probe.Leaf, Health: probe.Health})
 			case probe.Run != "":

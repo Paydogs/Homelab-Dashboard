@@ -1,11 +1,12 @@
-// Homelab dashboard UI: group selection (left column + drill-down tiles),
-// search/tag filtering, clock, style picker, editor modals, run items, toasts.
+// Homelab dashboard UI: group selection (left column, nested groups expand
+// as titled sections), search/tag filtering, clock, style picker, editor
+// modals, run items, toasts.
 // Plain JS — no framework beyond the vendored Alpine.js for the confirm menus.
 
 (function () {
   "use strict";
 
-  /* ---- group selection: sidebar (root groups) + tiles (drill-down) ---- */
+  /* ---- group selection: sidebar (root groups) ---- */
 
   var GROUP_KEY = "dashboard.group";
   var sidebar = document.querySelector(".groups");
@@ -18,38 +19,64 @@
     return null;
   }
 
+  // a selection is valid if the group exists anywhere in the tree —
+  // container-only groups (nothing but sub-groups) have no panel, only a
+  // sidebar entry and the middle-column cards
+  function groupExists(path) {
+    if (panelFor(path)) return true;
+    var items = document.querySelectorAll(".group-item");
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].dataset.path === path) return true;
+    }
+    return false;
+  }
+
   function selectedGroup() {
     // priority: URL hash (restores refreshes + shareable links) →
     // remembered pick → the server-rendered default
     var fromHash = null;
     try { fromHash = decodeURIComponent((location.hash.match(/group=([^&]+)/) || [])[1] || ""); } catch (e) { /* */ }
-    if (fromHash && panelFor(fromHash)) return fromHash;
+    if (fromHash && groupExists(fromHash)) return fromHash;
     var saved = null;
     try { saved = localStorage.getItem(GROUP_KEY); } catch (e) { /* */ }
-    if (saved && panelFor(saved)) return saved;
+    if (saved && groupExists(saved)) return saved;
     var first = document.querySelector(".group-panel.selected");
-    return first ? first.dataset.path : (panels[0] ? panels[0].dataset.path : null);
+    if (first) return first.dataset.path;
+    var firstItem = document.querySelector(".group-item");
+    return firstItem ? firstItem.dataset.path : null;
+  }
+
+  // the middle column: only the selected root's sub-group cards show
+  function showCardsFor(path) {
+    var root = path ? path.split("/")[0] : null;
+    document.querySelectorAll(".group-cards").forEach(function (nav) {
+      nav.classList.toggle("hidden", nav.dataset.root !== root);
+    });
   }
 
   function applySelection(path) {
+    // panels carry the SERVER-rendered `hidden` class — toggle the class,
+    // not the hidden property (it can't remove the class)
     document.querySelectorAll(".group-panel").forEach(function (p) {
-      p.hidden = p.dataset.path !== path;
+      p.classList.toggle("hidden", p.dataset.path !== path);
     });
-    document.querySelectorAll(".group-item, .tile").forEach(function (b) {
+    // exact match lights the picked card (middle column), …
+    document.querySelectorAll(".group-item").forEach(function (b) {
       b.classList.toggle("active", b.dataset.path === path);
     });
-    // the sidebar highlights the ROOT of the selection
-    document.querySelectorAll(".group-item").forEach(function (b) {
+    // …and the sidebar additionally highlights the ROOT of the selection
+    document.querySelectorAll(".groups .group-item").forEach(function (b) {
       var root = (path.split("/"))[0];
       b.classList.toggle("active", b.dataset.path === root);
     });
+    showCardsFor(path);
     try { localStorage.setItem(GROUP_KEY, path); } catch (e) { /* */ }
     try { history.replaceState(null, "", "#group=" + encodeURIComponent(path)); } catch (e) { /* */ }
     applyFilters();
   }
 
   document.addEventListener("click", function (e) {
-    var el = e.target.closest(".group-item, .tile");
+    var el = e.target.closest(".group-item");
     if (!el || !el.dataset.path) return;
     applySelection(el.dataset.path);
   });
@@ -84,8 +111,13 @@
 
   function applyFilters() {
     if (searchActive()) {
-      // searching covers the whole tree: reveal every panel that has
-      // matches (tiles are meaningless while drilling is off)
+      // searching covers the whole tree via the ROOT panels (nested groups
+      // expand inside them; the standalone nested panels stay out of the way)
+      document.querySelectorAll(".group-cards").forEach(function (nav) {
+        nav.classList.add("hidden"); // cards are meaningless while searching
+      });
+      // every panel stands alone (rows live in exactly one panel), so a
+      // simple per-panel match count decides visibility
       document.querySelectorAll(".group-panel").forEach(function (panel) {
         var matches = 0;
         panel.querySelectorAll(".row").forEach(function (row) {
@@ -93,17 +125,14 @@
           row.classList.toggle("hidden", !show);
           if (show) matches++;
         });
-        panel.hidden = matches === 0;
-        var tiles = panel.querySelector(".tiles");
-        if (tiles) tiles.classList.add("hidden");
+        panel.classList.toggle("hidden", matches === 0);
       });
     } else {
       document.querySelectorAll(".group-panel").forEach(function (panel) {
-        panel.hidden = panel.dataset.path !== selectedGroup();
+        panel.classList.toggle("hidden", panel.dataset.path !== selectedGroup());
         panel.querySelectorAll(".row.hidden").forEach(function (r) { r.classList.remove("hidden"); });
-        var tiles = panel.querySelector(".tiles");
-        if (tiles) tiles.classList.remove("hidden");
       });
+      showCardsFor(selectedGroup());
     }
   }
 
@@ -192,6 +221,10 @@
 
   function applyStyle(style) {
     if (style) document.documentElement.dataset.style = style;
+    // keep the browser UI (installed-app titlebar) in sync with the style
+    var bg = getComputedStyle(document.body).getPropertyValue("--bg").trim();
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (bg && meta) meta.content = bg;
   }
 
   /* ---- editors: config (single pane) + style (base | overrides) ---- */
@@ -222,6 +255,63 @@
       .then(function (res) { return res.text(); })
       .then(fill)
       .catch(function (err) { editError.textContent = String(err.message || err); });
+  }
+
+  /* ---- data folder: show, open, and switch (host-local viewers only) ---- */
+
+  var dataBtn = document.getElementById("open-data-btn");
+  var dataOverlay = document.getElementById("data-overlay");
+  if (dataBtn && dataOverlay) {
+    var dataPath = document.getElementById("data-path");
+    var dataError = document.getElementById("data-error");
+
+    dataBtn.addEventListener("click", function () {
+      dataError.textContent = "";
+      dataPath.value = "…";
+      dataOverlay.hidden = false;
+      fetch("/data-dir")
+        .then(function (res) { return res.text(); })
+        .then(function (text) { dataPath.value = text; })
+        .catch(function (err) { dataError.textContent = String(err.message || err); });
+    });
+
+    document.getElementById("data-close").addEventListener("click", function () {
+      dataOverlay.hidden = true;
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !dataOverlay.hidden) dataOverlay.hidden = true;
+    });
+
+    document.getElementById("data-open").addEventListener("click", function () {
+      fetch("/open-data", { method: "POST" }).then(function (res) {
+        if (!res.ok) dataError.textContent = "could not open the folder";
+      }).catch(function () {
+        dataError.textContent = "could not open the folder";
+      });
+    });
+
+    document.getElementById("data-set").addEventListener("click", function () {
+      dataError.textContent = "";
+      fetch("/data-dir", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: dataPath.value
+      })
+        .then(function (res) {
+          return res.text().then(function (text) {
+            if (!res.ok) {
+              dataError.textContent = text;
+              return;
+            }
+            dataOverlay.hidden = true;
+            toast("data folder switched — reloading", "");
+            setTimeout(function () { window.location.reload(); }, 600);
+          });
+        })
+        .catch(function (err) {
+          dataError.textContent = String(err.message || err);
+        });
+    });
   }
 
   if (overlay) {
@@ -313,13 +403,22 @@
 
   /* ---- initial state ---- */
 
+  // offline shell: register the service worker on secure origins only — on
+  // plain-HTTP LAN hosts navigator.serviceWorker is undefined and we skip
+  // quietly (the manifest/icons/theme-color still work there)
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function () { /* no SW */ });
+    });
+  }
+
   // apply the resolved selection once everything above is in place
   selectGroupInit();
   function selectGroupInit() {
     var sel = selectedGroup();
     if (sel) {
       document.querySelectorAll(".group-panel").forEach(function (p) {
-        p.hidden = p.dataset.path !== sel;
+        p.classList.toggle("hidden", p.dataset.path !== sel);
       });
       applySelection(sel);
     }

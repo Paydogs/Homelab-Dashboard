@@ -60,13 +60,22 @@ func (m *Manager) ensureIcons(cfg *domain.Config) {
 // anything unusable falls back to the placeholder.
 func (m *Manager) ResolveIcon(icon string) string {
 	iconsDir := filepath.Join(m.resPath, "icons")
+	cached := func(name string) (string, bool) {
+		if _, err := os.Stat(filepath.Join(iconsDir, name)); err == nil {
+			return "/resources/icons/" + name, true
+		}
+		return "", false
+	}
 	switch {
 	case isURL(icon):
-		return "/resources/icons/" + iconFilename(icon)
+		// fall back to the placeholder until the cached copy exists —
+		// a failed download must never render a broken image
+		if url, ok := cached(iconFilename(icon)); ok {
+			return url
+		}
 	case icon != "":
-		local := filepath.Join(iconsDir, icon)
-		if _, err := os.Stat(local); err == nil {
-			return "/resources/icons/" + icon
+		if url, ok := cached(icon); ok {
+			return url
 		}
 	}
 	return FallbackIcon
@@ -111,13 +120,21 @@ func downloadIcon(client *http.Client, rawURL, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %s", resp.Status)
 	}
-	f, err := os.Create(dest)
+	f, err := os.CreateTemp(filepath.Dir(dest), ".icon-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// write-then-rename: a failed copy must not leave a partial file that
+	// ensureIcons would forever skip as "already downloaded"
+	tmp := f.Name()
 	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return err
 	}
-	return nil
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dest)
 }

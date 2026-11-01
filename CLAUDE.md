@@ -147,10 +147,14 @@ groups:                  # a recursive tree
         url: http://192.168.1.30:3000
         icon: …          # optional; URL icons download once to resources/icons/
         tags: [dev]      # shown on the row, filter/search over tags, url, name
+        private: true    # self-signed/private cert (Proxmox & co.): dismiss TLS
+                         # verification for the probe instead of showing OFFLINE
+                         # (only meaningful with a health: block)
         health:          # optional; omit = no healthcheck
           path: /            # omitted path = probe the root
           interval: 60s      # default 60s
           degraded_after: 250ms  # slower answers show DEGRADED instead of ONLINE
+          disabled: true     # probe off, settings kept (maintenance) — shows no status
       - app: Steam       # ← a leaf: launched on the dashboard host
         run: C:\Program Files (x86)\Steam\steam.exe
 ```

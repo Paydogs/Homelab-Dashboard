@@ -75,6 +75,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /style-source/{id}/overwrite", s.saveStyle)
 	mux.HandleFunc("GET /health-status/{key...}", s.healthStatus)
 	mux.HandleFunc("POST /run/{key...}", s.run)
+	mux.HandleFunc("POST /open-data", s.openData)
+	mux.HandleFunc("GET /data-dir", s.dataDirCurrent)
+	mux.HandleFunc("POST /data-dir", s.dataDirSet)
+	mux.HandleFunc("GET /manifest.webmanifest", s.manifest)
+	mux.HandleFunc("GET /sw.js", s.swJS)
 	mux.Handle("GET /static/", staticHandler())
 	mux.HandleFunc("GET /fonts/{id}/{file...}", s.styleFont)
 	mux.Handle("GET /resources/", http.StripPrefix("/resources/",
@@ -87,7 +92,18 @@ func staticHandler() http.Handler {
 	if err != nil {
 		panic("embedded static assets missing: " + err.Error())
 	}
-	return http.StripPrefix("/static/", http.FileServer(http.FS(files)))
+	return http.StripPrefix("/static/", cacheable(http.FileServer(http.FS(files))))
+}
+
+// cacheable marks embedded static assets cacheable for an hour: they are
+// immutable for the lifetime of a binary. Style folder serves (/fonts/,
+// /resources/) are deliberately left headerless — those files change on
+// disk without a restart.
+func cacheable(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(logger *log.Logger, next http.Handler) http.Handler {

@@ -198,6 +198,135 @@ func TestIconFilename(t *testing.T) {
 	}
 }
 
+// A URL icon whose cached copy is missing (e.g. the download failed, as on
+// a fresh deploy without network or write access to resources/) must fall
+// back to the placeholder — never render a broken /resources link.
+func TestResolveIconFallback(t *testing.T) {
+	mgr, err := NewManager(write(t, valid), testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	iconURL := "https://example.org/icons/logo.png"
+	if got := mgr.ResolveIcon(iconURL); got != FallbackIcon {
+		t.Errorf("ResolveIcon before download = %q, want fallback %q", got, FallbackIcon)
+	}
+	iconsDir := filepath.Join(mgr.ResourcesDir(), "icons")
+	if err := os.MkdirAll(iconsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := iconFilename(iconURL)
+	if err := os.WriteFile(filepath.Join(iconsDir, name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if want := "/resources/icons/" + name; mgr.ResolveIcon(iconURL) != want {
+		t.Errorf("ResolveIcon after download = %q, want %q", mgr.ResolveIcon(iconURL), want)
+	}
+}
+
+// Retarget (the desktop "set data folder" action): switching to a new
+// folder seeds + loads it; an invalid config there must fail WITHOUT losing
+// the folder being served.
+func TestRetarget(t *testing.T) {
+	mgr, err := NewManager(write(t, valid), testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := mgr.DataDir()
+
+	// success: empty target dir gets seeded with the sample config
+	target := filepath.Join(t.TempDir(), "other")
+	seeded := false
+	seed := func(dir string) error {
+		seeded = true
+		return os.WriteFile(filepath.Join(dir, "config.yml"), []byte("title: Other\n"), 0o644)
+	}
+	if err := mgr.Retarget(target, seed); err != nil {
+		t.Fatal(err)
+	}
+	if !seeded {
+		t.Error("seed function was not called for the empty folder")
+	}
+	if got := mgr.Get().Title; got != "Other" {
+		t.Errorf("title after retarget = %q, want Other", got)
+	}
+	if mgr.DataDir() == orig {
+		t.Error("DataDir did not switch")
+	}
+
+	// failure: unparseable config in the target leaves the CURRENT folder serving
+	bad := filepath.Join(t.TempDir(), "bad")
+	os.MkdirAll(bad, 0o755)
+	os.WriteFile(filepath.Join(bad, "config.yml"), []byte("groups: ["), 0o644)
+	if err := mgr.Retarget(bad, nil); err == nil {
+		t.Fatal("expected error for unparseable target config")
+	}
+	if got := mgr.Get().Title; got != "Other" {
+		t.Errorf("failed retarget lost current config: title = %q, want Other", got)
+	}
+	if mgr.DataDir() == bad {
+		t.Error("failed retarget still switched DataDir")
+	}
+}
+
+// `private:` sits on the service (the site is private): with a health block
+// the probe keeps running but dismisses TLS verification; without one, or
+// on an app, it is a validation error.
+func TestPrivateService(t *testing.T) {
+	src := `
+title: T
+groups:
+  - group: Servers
+    children:
+      - service: Proxmox
+        url: https://10.25.2.125:8006
+        private: true
+        health: {path: /}
+`
+	mgr, err := NewManager(write(t, src), testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, child, ok := mgr.Get().FindService("Servers/Proxmox")
+	if !ok {
+		t.Fatal("Proxmox not found")
+	}
+	svc := child.(*domain.Service)
+	if !svc.Private {
+		t.Error("Private = false, want true")
+	}
+	if svc.Health == nil {
+		t.Error("health block missing")
+	}
+}
+
+func TestPrivateMisuseRejected(t *testing.T) {
+	cases := map[string]string{
+		"private without health": `
+title: T
+groups:
+  - group: G
+    children:
+      - service: X
+        url: https://x
+        private: true
+`,
+		"private on app": `
+title: T
+groups:
+  - group: G
+    children:
+      - app: X
+        run: x.exe
+        private: true
+`,
+	}
+	for name, src := range cases {
+		if _, err := NewManager(write(t, src), testLogger(t)); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
+	}
+}
+
 // the self-explanatory syntax: blocks declare what they are on their start
 // line — group:/service:/app: — with title:/items: still valid aliases.
 func TestSelfExplanatorySyntax(t *testing.T) {

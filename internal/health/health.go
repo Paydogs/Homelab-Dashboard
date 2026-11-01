@@ -5,6 +5,7 @@ package health
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,12 +35,15 @@ type Target struct {
 	BaseURL  string
 	Path     string
 	Interval time.Duration
+	// Private dismisses TLS verification for this target (self-signed certs).
+	Private bool
 }
 
 // Engine owns one goroutine per target, diff-replacing them as the config
 // reloads.
 type Engine struct {
 	client  *http.Client
+	private *http.Client // for targets dismissing TLS verification
 	mu      sync.Mutex
 	workers map[string]*worker
 	results map[string]Result
@@ -53,7 +57,14 @@ type worker struct {
 // New creates an idle engine.
 func New() *Engine {
 	return &Engine{
-		client:  &http.Client{Timeout: 5 * time.Second},
+		client: &http.Client{Timeout: 5 * time.Second},
+		private: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				// config-authored, opt-in per service, homelab self-signed certs only
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+			},
+		},
 		workers: map[string]*worker{},
 		results: map[string]Result{},
 	}
@@ -110,8 +121,12 @@ func (e *Engine) run(ctx context.Context, w *worker) {
 }
 
 func (e *Engine) probe(t Target) Result {
+	client := e.client
+	if t.Private {
+		client = e.private
+	}
 	start := time.Now()
-	resp, err := e.client.Get(probeURL(t)) //nolint:gosec // healthcheck URLs are authored in the local config file
+	resp, err := client.Get(probeURL(t)) //nolint:gosec // healthcheck URLs are authored in the local config file
 	latency := time.Since(start)
 	if err != nil {
 		return Result{Status: StatusDown, Latency: latency, Checked: time.Now(), Err: err.Error()}

@@ -31,6 +31,7 @@ type Manager struct {
 	logger   *log.Logger
 	mu       sync.Mutex
 	cfg      *domain.Config
+	lastErr  error // last failed (re)load — shown as a page banner
 	lastMod  time.Time
 	lastSize int64
 }
@@ -56,17 +57,30 @@ func NewManager(dataDir string, logger *log.Logger) (*Manager, error) {
 }
 
 // Get returns the current config, re-reading the file first if its metadata
-// changed. A failed reload keeps serving the last good config.
+// changed. A failed reload keeps serving the last good config and records
+// the error (see LoadError) so the page can show it.
 func (m *Manager) Get() *domain.Config {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st, err := os.Stat(m.path)
 	if err == nil && (st.ModTime() != m.lastMod || st.Size() != m.lastSize) {
 		if err := m.reloadLocked(); err != nil {
+			m.lastErr = err
 			m.logger.Printf("config reload failed: %v (keeping previous config)", err)
+		} else {
+			m.lastErr = nil
 		}
 	}
 	return m.cfg
+}
+
+// LoadError is the most recent (re)load failure — nil when the config on
+// disk last parsed cleanly. The page renders it as a banner; the manager
+// keeps serving the last good config meanwhile.
+func (m *Manager) LoadError() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastErr
 }
 
 // DataDir is the dashboard's data folder (config.yml + resources/).
@@ -85,6 +99,40 @@ func (m *Manager) RunService(key string) (domain.Child, bool) {
 	defer m.mu.Unlock()
 	_, child, ok := cfg.FindService(key)
 	return child, ok && domain.IsRunnable(child)
+}
+
+// Retarget switches the manager to a different data folder at runtime (the
+// desktop "set data folder" action): the folder is created, seeded when it
+// holds no config yet, and the config must parse and validate exactly like
+// at startup — on any error the manager keeps serving the previous folder.
+func (m *Manager) Retarget(dataDir string, seed func(dir string) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	abs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return fmt.Errorf("resolving data dir: %w", err)
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return err
+	}
+	if seed != nil {
+		if err := seed(abs); err != nil {
+			return err
+		}
+	}
+	path := filepath.Join(abs, "config.yml")
+	cfg, err := parseFile(path)
+	if err != nil {
+		return err
+	}
+	m.dataDir, m.path, m.resPath = abs, path, filepath.Join(abs, "resources")
+	if st, err := os.Stat(path); err == nil {
+		m.lastMod, m.lastSize = st.ModTime(), st.Size()
+	}
+	m.cfg = cfg
+	m.lastErr = nil
+	m.ensureIcons(cfg)
+	return nil
 }
 
 // reloadLocked parses and validates the file and caches the result. Called

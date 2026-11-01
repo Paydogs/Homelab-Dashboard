@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -26,15 +27,16 @@ type SidebarView struct {
 	Selected bool
 }
 
-// GroupView is the rendered panel for one group: its direct child rows,
-// tiles for its sub-groups, and its aggregated subtree state. Groups are
+// GroupView is the rendered panel for one group: its direct child rows and
+// its sub-groups rendered as titled sections inside the same panel (nested
+// groups read as stacked blocks, the way dashboard rows look). Groups are
 // structural — the panel header shows title + subtitle only.
 type GroupView struct {
-	Path     string
-	Name     string
-	Subtitle string
-	Items    []ItemView
-	Tiles    []SidebarView
+	Path      string
+	Name      string
+	Subtitle  string
+	Items     []ItemView
+	SubGroups []GroupView
 
 	OK       int
 	Degraded int
@@ -76,6 +78,15 @@ type SummaryView struct {
 	Alerts int
 }
 
+// CardColumn is the middle column: the sub-groups of one root group as a
+// stack of cards (same shape as the sidebar entries). Only the selected
+// root's column shows at a time; when the selected group has no sub-groups
+// the column collapses away.
+type CardColumn struct {
+	Root  string
+	Cards []SidebarView
+}
+
 type viewData struct {
 	Title     string
 	Summary   SummaryView
@@ -83,13 +94,22 @@ type viewData struct {
 	Styles    []domain.Style
 	StylesCSS template.CSS
 
-	// Sidebar lists the root groups; Panels carries every group's render
-	// (only the selected one is shown, the browser handles selection).
-	Sidebar []SidebarView
-	Panels  []GroupView
+	// Sidebar lists the root groups; CardCols stacks the sub-group cards per
+	// root group; Panels carries every group's render (only the selected one
+	// is shown, the browser handles selection).
+	Sidebar  []SidebarView
+	CardCols []CardColumn
+	Panels   []GroupView
 
 	DefaultStyle string
 	CanEdit      bool
+	// CanOpenFolder shows the "open data folder" button: it acts on the
+	// dashboard host, so only a viewer on the host itself (localhost) sees it.
+	CanOpenFolder bool
+	// ConfigError surfaces a broken config: the file on disk failed to parse
+	// or validate — the app keeps serving the last good config and shows
+	// this as a page banner.
+	ConfigError string
 }
 
 // index re-reads the config (so a browser refresh picks up edits), syncs
@@ -99,6 +119,10 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	s.syncHealth(cfg)
 	data := buildView(cfg, s.cfg, s.eng, s.styles)
 	data.CanEdit = editAllowed(cfg, r)
+	data.CanOpenFolder = isLocal(r)
+	if err := s.cfg.LoadError(); err != nil {
+		data.ConfigError = fmt.Sprintf("%s has an error: %v — serving the last good version", s.cfg.Path(), err)
+	}
 	s.render(w, "page.tmpl", data)
 }
 
@@ -128,12 +152,16 @@ func (s *Server) healthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.syncHealth(s.cfg.Get())
 	threshold := domain.DefaultDegradedAfter
-	if svc, isService := child.(*domain.Service); isService && svc.Health != nil {
-		if d, err := svc.Health.DegradedD(); err == nil {
-			threshold = d
+	private := false
+	if svc, isService := child.(*domain.Service); isService {
+		private = svc.Private
+		if svc.Health != nil {
+			if d, err := svc.Health.DegradedD(); err == nil {
+				threshold = d
+			}
 		}
 	}
-	s.render(w, "components/health-status.tmpl", healthView(s.eng, key, threshold))
+	s.render(w, "components/health-status.tmpl", healthView(s.eng, key, threshold, private))
 }
 
 // syncHealth diffs the running healthcheck workers against the current
@@ -143,7 +171,7 @@ func (s *Server) syncHealth(cfg *domain.Config) {
 	cfg.Walk(func(path string, g *domain.Group) {
 		for _, ch := range g.Items {
 			svc, isService := ch.(*domain.Service)
-			if !isService || svc.Health == nil {
+			if !isService || svc.Health == nil || svc.Health.Disabled {
 				continue
 			}
 			interval, err := svc.Health.IntervalD()
@@ -155,6 +183,7 @@ func (s *Server) syncHealth(cfg *domain.Config) {
 				BaseURL:  svc.URL,
 				Path:     svc.Health.Path,
 				Interval: interval,
+				Private:  svc.Private,
 			})
 		}
 	})
@@ -198,12 +227,12 @@ func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styl
 				Kind:     "service",
 			}
 			if svc, isService := ch.(*domain.Service); isService {
-				if svc.Health != nil {
+				if svc.Health != nil && !svc.Health.Disabled {
 					threshold, err := svc.Health.DegradedD()
 					if err != nil {
 						threshold = domain.DefaultDegradedAfter // validated at load
 					}
-					v.Health = healthView(eng, v.Key, threshold)
+					v.Health = healthView(eng, v.Key, threshold, svc.Private)
 					switch v.Health.Status {
 					case "up":
 						gv.OK++
@@ -224,15 +253,22 @@ func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styl
 		for i := range g.Groups {
 			sub := g.Groups[i]
 			subPath := domain.ChildPath(path, sub.Title)
-			// recursion builds the sub panel AND returns its subtree counts
+			// recursion builds the sub-group section AND returns its subtree
+			// counts
 			subTree := visit(subPath, &sub)
 			gv.OK += subTree.OK
 			gv.Error += subTree.Error
 			gv.Total += subTree.Total
-			gv.Tiles = append(gv.Tiles, SidebarView{Path: subPath, Name: sub.Title,
-				OK: subTree.OK, Error: subTree.Error, Total: subTree.Total})
+			gv.SubGroups = append(gv.SubGroups, subTree)
 		}
 		gv.Fraction = itoa(gv.OK) + "/" + itoa(gv.Total)
+		// a group holding ONLY sub-groups is a pure container: no composite
+		// panel — the middle column's cards are its entire presentation.
+		// (An empty group — no items, no sub-groups — keeps its panel so it
+		// can show "no services yet".)
+		if len(gv.Items) > 0 || len(gv.SubGroups) == 0 {
+			data.Panels = append(data.Panels, gv)
+		}
 		return gv
 	}
 
@@ -240,10 +276,24 @@ func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styl
 		gv := visit(cfg.Groups[i].Title, &cfg.Groups[i])
 		// server-side default selection: the first root group; the browser's
 		// remembered pick overrides on load
-		gv.Selected = i == 0
-		data.Panels = append(data.Panels, gv)
+		for j := range data.Panels {
+			if data.Panels[j].Path == gv.Path {
+				data.Panels[j].Selected = i == 0
+				break
+			}
+		}
 		data.Summary.OK += gv.OK
 		data.Summary.Total += gv.Total
+		// middle column: the root's sub-groups as a stack of cards
+		if len(gv.SubGroups) > 0 {
+			col := CardColumn{Root: gv.Path}
+			for _, sub := range gv.SubGroups {
+				col.Cards = append(col.Cards, SidebarView{
+					Path: sub.Path, Name: sub.Name, OK: sub.OK, Error: sub.Error, Total: sub.Total,
+				})
+			}
+			data.CardCols = append(data.CardCols, col)
+		}
 		// sidebar entry per root group
 		data.Sidebar = append(data.Sidebar, SidebarView{
 			Path:     gv.Path,
@@ -251,7 +301,7 @@ func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styl
 			OK:       gv.OK,
 			Error:    gv.Error,
 			Total:    gv.Total,
-			Selected: gv.Selected,
+			Selected: i == 0,
 		})
 	}
 	return data
@@ -278,12 +328,16 @@ func resolveDefaultStyle(cfg *domain.Config, styles []domain.Style) string {
 func itoa(n int) string { return strconv.Itoa(n) }
 
 // healthView classifies the latest probe: fast answers ONLINE, slow answers
-// DEGRADED, failures OFFLINE.
-func healthView(eng *health.Engine, key string, degradedAfter time.Duration) *HealthView {
+// DEGRADED, failures OFFLINE. Private targets get a hint in the tooltip that
+// TLS verification is dismissed for them (self-signed cert).
+func healthView(eng *health.Engine, key string, degradedAfter time.Duration, private bool) *HealthView {
 	view := &HealthView{Key: key, Status: "pending", Label: "CHECKING", Latency: "—", Title: "checking…"}
 	res, ok := eng.Result(key)
 	if !ok || res.Status == health.StatusPending {
 		return view
+	}
+	if private {
+		defer func() { view.Title += " · self-signed cert accepted" }()
 	}
 	checkedAt := res.Checked.Format("15:04:05")
 	switch res.Status {
