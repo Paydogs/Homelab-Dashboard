@@ -69,6 +69,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /groups", s.groups)
 	mux.HandleFunc("GET /summary", s.summary)
+	mux.HandleFunc("GET /results", s.results)
 	mux.HandleFunc("GET /config-source", s.configSource)
 	mux.HandleFunc("POST /config-source", s.saveConfig)
 	mux.HandleFunc("GET /style-source/{id}/{part}", s.styleSource)

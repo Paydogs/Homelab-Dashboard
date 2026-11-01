@@ -7,7 +7,7 @@
  *
  * Bump CACHE whenever a static asset changes (no build step stamps it for us).
  */
-var CACHE = "dash-v6";
+var CACHE = "dash-v10";
 
 var SHELL = [
   "/",

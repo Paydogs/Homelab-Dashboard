@@ -81,7 +81,11 @@
   </div>
 </section>
 
-<div class="frame{{if .CardCols}} has-cards{{end}}">
+{{/* search results overview: rows of every matching leaf across the whole
+   tree, server-filtered, shown in a tinted box over the column layout */}}
+<section id="search-results" class="search-results hidden" aria-label="search results"></section>
+
+<div class="frame">
   <aside class="sidebar">
     {{if .Sidebar}}
     {{template "groups-list.tmpl" .Sidebar}}
@@ -90,35 +94,36 @@
     {{end}}
   </aside>
 
-  {{range $i, $col := .CardCols}}
-  <nav class="group-cards{{if ne $i 0}} hidden{{end}}" data-root="{{$col.Root}}" aria-label="sub-groups of {{$col.Root}}">
-    {{range $col.Cards}}
-    <button class="group-item" data-path="{{.Path}}" type="button">
-      <span class="group-item-name">{{.Name}} <span class="group-item-total">· {{.Total}}</span></span>
-      <span class="group-item-counts">
-        {{if .OK}}<span class="count ok">{{.OK}} ok</span>{{end}}
-        {{if .Error}}<span class="count err">{{.Error}} err</span>{{end}}
-      </span>
-    </button>
-    {{end}}
-  </nav>
-  {{end}}
-
-  <main class="panel">
-    {{range .Panels}}
+  {{/* miller columns: one drill-down column per group, holding its
+     sub-group cards and its leaf rows; the browser shows the selection's
+     chain of columns and sizes them a third / quarter / … each */}}
+  <main class="levels">
+    {{range .Levels}}
     <section class="group-panel {{if not .Selected}}hidden{{end}}{{if .Selected}} selected{{end}}" data-path="{{.Path}}">
       <header class="panel-head">
         <div class="panel-id">
           <h2>{{.Name}}</h2>
-          {{with .Subtitle}}<div class="panel-sub">{{.}}</div>{{end}}
         </div>
         <div class="panel-state">
           <div class="panel-fraction">{{.Fraction}}</div>
         </div>
       </header>
+      {{if .Cards}}
+      <div class="level-cards">
+        {{range .Cards}}
+        <button class="group-item" data-path="{{.Path}}" type="button">
+          <span class="group-item-name">{{.Name}} <span class="group-item-total">· {{.Total}}</span></span>
+          <span class="group-item-counts">
+            {{if .OK}}<span class="count ok">{{.OK}} ok</span>{{end}}
+            {{if .Error}}<span class="count err">{{.Error}} err</span>{{end}}
+          </span>
+        </button>
+        {{end}}
+      </div>
+      {{end}}
       <div class="rows">
         {{range .Items}}{{template "components/card.tmpl" .}}{{end}}
-        {{if not .Items}}<div class="row-empty">no services yet</div>{{end}}
+        {{if not .Items}}{{if not .Cards}}<div class="row-empty">no services yet</div>{{end}}{{end}}
       </div>
     </section>
     {{end}}

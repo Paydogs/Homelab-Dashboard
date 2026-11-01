@@ -21,6 +21,9 @@
   --pending: #9babb2;
   --chip: color-mix(in srgb, #374e4a 60%, transparent);
 
+  /* layout: overall page width */
+  --layout-max: 1500px;
+
   /* font tokens — a style's `font: file.ttf` / `titleFont: file.ttf`
      (resolved against resources/styles/<id>/) override these with an
      @font-face'd family + Arial fallback; fontSize sets the root size
@@ -67,7 +70,7 @@ body {
 /* ---- masthead: title, big clock, stats, style picker ---- */
 
 .masthead {
-  max-width: 1200px;
+  max-width: var(--layout-max);
   margin: 1.25rem auto 0;
   padding: 1rem 1.25rem 1.1rem;
   background: var(--panel);
@@ -196,7 +199,7 @@ body {
 /* ---- filter row ---- */
 
 .filter-row {
-  max-width: 1200px;
+  max-width: var(--layout-max);
   margin: 1.1rem auto 0;
   padding: 0 0.25rem;
   display: flex;
@@ -244,30 +247,64 @@ body {
   border-color: var(--text);
 }
 
-/* ---- frame: groups (left) | sub-group cards | selected panel (right) ---- */
+/* ---- search results: tinted box over the column layout ---- */
+
+.search-results {
+  max-width: var(--layout-max);
+  margin: 1.1rem auto 0;
+  padding: 0.55rem 0.9rem 0.75rem;
+  background: color-mix(in srgb, var(--raised) 24%, var(--panel));
+  border: 1px solid var(--border-faint);
+  border-radius: 16px;
+}
+
+.search-results.hidden { display: none; }
+
+/* each result renders as one cell of a 3-wide grid */
+.results-grid {
+  margin-top: 0.4rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem 0.8rem;
+}
+
+.results-grid .row {
+  background: var(--inset);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+}
+
+.results-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ---- miller columns ---- */
 
 .frame {
-  max-width: 1200px;
+  max-width: var(--layout-max);
   margin: 1.25rem auto 3rem;
   padding: 0 0.25rem;
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+  /* no-JS default: sidebar + the first column, each a third (empty third
+     after); layoutFrame() sizes the tracks live from the visible columns */
+  grid-template-columns: calc((100% - 2.2rem) / 3) calc((100% - 2.2rem) / 3) minmax(0, 1fr);
   gap: 1.1rem;
   align-items: start;
 }
 
-/* with sub-group cards the middle slot joins the frame */
-.frame.has-cards { grid-template-columns: 270px 230px minmax(0, 1fr); }
+.levels { display: contents; }
 
-.group-cards {
+.level-cards {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  position: sticky;
-  top: 1rem;
+  padding: 0.55rem 0.3rem 0.1rem;
 }
 
-.group-cards.hidden { display: none; }
+.level-cards.hidden { display: none; }
 
 .sidebar { position: sticky; top: 1rem; }
 
@@ -721,9 +758,10 @@ body {
   .filter-row .search { flex: 1 0 100%; max-width: none; }
 
   /* the frame stacks: groups become a horizontal row of blocks on top */
-  .frame, .frame.has-cards { grid-template-columns: minmax(0, 1fr); }
-  .sidebar, .group-cards { position: static; }
-  .groups, .group-cards { flex-direction: row; flex-wrap: wrap; }
+  .frame { grid-template-columns: minmax(0, 1fr); }
+  .results-grid { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: static; }
+  .groups, .level-cards { flex-direction: row; flex-wrap: wrap; }
   .group-item { width: auto; min-width: 150px; }
 
   .group-panel { border-radius: 14px; }

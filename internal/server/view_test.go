@@ -12,31 +12,29 @@ import (
 	"dashboard/internal/styles"
 )
 
-// Group rendering rules:
-//   - a group with leaf rows renders its own panel (rows + expanded
-//     sub-group sections) — Root here
-//   - a group holding ONLY sub-groups is a pure container: no panel, only
-//     its middle-column cards — Container here
-//   - every nested group with rows gets a standalone panel (drill-in target)
-func TestNestedGroupPanels(t *testing.T) {
+// Miller-column view: every group renders a drill-down column holding its
+// sub-group cards + its leaf rows; the first root's column is the
+// server-side default selection.
+func TestLevelColumns(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "config.yml"), []byte(`title: T
 groups:
-  - group: Root
+  - group: Leafy
     children:
       - service: A
         url: http://a
+  - group: Branchy
     groups:
-      - group: Sub
+      - group: Mid
+        groups:
+          - group: Deep
+            children:
+              - service: D
+                url: http://d
+      - group: Flat
         children:
-          - service: B
-            url: http://b
-  - group: Container
-    groups:
-      - group: Inner
-        children:
-          - service: C
-            url: http://c
+          - service: F
+            url: http://f
 `), 0o644)
 	logger := log.New(io.Discard, "", 0)
 	mgr, err := config.NewManager(dir, logger)
@@ -46,55 +44,63 @@ groups:
 	styleMgr := styles.NewManager(filepath.Join(dir, "resources", "styles"), logger)
 	data := buildView(mgr.Get(), mgr, health.New(), styleMgr)
 
-	seen := map[string]bool{}
-	for _, p := range data.Panels {
-		seen[p.Path] = true
+	cols := map[string]*LevelColumn{}
+	for _, l := range data.Levels {
+		cols[l.Path] = l
 	}
-	for _, want := range []string{"Root", "Root/Sub", "Container/Inner"} {
-		if !seen[want] {
-			t.Errorf("panel %q missing from render (got %v)", want, seen)
+	// every group in the tree got a column, containers included
+	for _, want := range []string{"Leafy", "Branchy", "Branchy/Mid", "Branchy/Mid/Deep", "Branchy/Flat"} {
+		if cols[want] == nil {
+			t.Fatalf("level column %q missing (have %v)", want, keysOf(data.Levels))
 		}
-	}
-	if seen["Container"] {
-		t.Error("container-only group must NOT render a composite panel")
 	}
 
-	// the nested service lands in its panel's rows
-	var sub *GroupView
-	for i := range data.Panels {
-		if data.Panels[i].Path == "Root/Sub" {
-			sub = &data.Panels[i]
+	// Leafy: rows only, no cards
+	if len(cols["Leafy"].Items) != 1 || len(cols["Leafy"].Cards) != 0 {
+		t.Errorf("Leafy column wrong: %+v", cols["Leafy"])
+	}
+	// Branchy: cards only
+	if len(cols["Branchy"].Cards) != 2 || len(cols["Branchy"].Items) != 0 {
+		t.Errorf("Branchy column wrong: %+v", cols["Branchy"])
+	}
+	// subtree counts flow up: Branchy's card for Deep totals 1
+	for _, card := range cols["Branchy"].Cards {
+		if card.Name == "Deep" && card.Total != 1 {
+			t.Errorf("Deep card counts: %+v", card)
 		}
 	}
-	if sub == nil || len(sub.Items) != 1 || sub.Items[0].Name != "B" {
-		t.Errorf("nested panel rows wrong: %+v", sub)
+	// the first root is the server-side default selection
+	if !cols["Leafy"].Selected {
+		t.Error("the first root's column should be marked Selected")
 	}
-	// the root panel carries the nested group as a titled section
-	var root *GroupView
-	for i := range data.Panels {
-		if data.Panels[i].Path == "Root" {
-			root = &data.Panels[i]
-		}
-	}
-	if root == nil || len(root.SubGroups) != 1 || root.SubGroups[0].Path != "Root/Sub" {
-		t.Errorf("root sub-group sections wrong: %+v", root)
-	} else if len(root.SubGroups[0].Items) != 1 || root.SubGroups[0].Items[0].Name != "B" {
-		t.Errorf("sub-group section rows wrong: %+v", root.SubGroups[0])
+	if cols["Branchy"].Selected {
+		t.Error("non-default columns must not be marked Selected")
 	}
 
-	// the middle column: sub-group cards of each root that has sub-groups —
-	// including container-only roots (they are nothing BUT their cards)
-	if len(data.CardCols) != 2 {
-		t.Fatalf("card columns wrong: %+v", data.CardCols)
+	// columns are in PRE-ORDER: parents before children, so a drill path
+	// reads left to right in the DOM
+	firstBranchy := -1
+	firstMid := -1
+	for i, l := range data.Levels {
+		switch l.Path {
+		case "Branchy":
+			firstBranchy = i
+		case "Branchy/Mid":
+			firstMid = i
+		}
 	}
-	if data.CardCols[0].Root != "Root" || len(data.CardCols[0].Cards) != 1 ||
-		data.CardCols[0].Cards[0].Path != "Root/Sub" {
-		t.Errorf("Root card column wrong: %+v", data.CardCols[0])
+	if firstBranchy == -1 || firstMid == -1 || firstBranchy > firstMid {
+		t.Errorf("columns out of order: parent Branchy (index %d) must precede Branchy/Mid (%d)",
+			firstBranchy, firstMid)
 	}
-	if data.CardCols[1].Root != "Container" || len(data.CardCols[1].Cards) != 1 ||
-		data.CardCols[1].Cards[0].Path != "Container/Inner" {
-		t.Errorf("Container card column wrong: %+v", data.CardCols[1])
+}
+
+func keysOf(levels []*LevelColumn) []string {
+	out := make([]string, 0, len(levels))
+	for _, l := range levels {
+		out = append(out, l.Path)
 	}
+	return out
 }
 
 // health: {disabled: true} probes nothing and the row carries no status —
@@ -126,12 +132,12 @@ groups:
 	data := buildView(mgr.Get(), mgr, srv.eng, styleMgr)
 
 	var normal, off *ItemView
-	for i := range data.Panels[0].Items {
-		switch data.Panels[0].Items[i].Name {
+	for i := range data.Levels[0].Items {
+		switch data.Levels[0].Items[i].Name {
 		case "Normal":
-			normal = &data.Panels[0].Items[i]
+			normal = &data.Levels[0].Items[i]
 		case "Off":
-			off = &data.Panels[0].Items[i]
+			off = &data.Levels[0].Items[i]
 		}
 	}
 	if normal == nil || normal.Health == nil {

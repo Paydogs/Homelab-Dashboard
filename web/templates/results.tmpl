@@ -1,0 +1,6 @@
+{{/* the search-results body (swapped into #search-results by htmx):
+   every matching leaf of the whole tree, as a 3-wide grid of row cards */}}
+<div class="results-grid">
+  {{range .}}{{template "components/card.tmpl" .}}{{end}}
+  {{if not .}}<div class="results-empty">nothing matches</div>{{end}}
+</div>

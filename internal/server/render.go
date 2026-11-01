@@ -27,24 +27,19 @@ type SidebarView struct {
 	Selected bool
 }
 
-// GroupView is the rendered panel for one group: its direct child rows and
-// its sub-groups rendered as titled sections inside the same panel (nested
-// groups read as stacked blocks, the way dashboard rows look). Groups are
-// structural — the panel header shows title + subtitle only.
-type GroupView struct {
-	Path      string
-	Name      string
-	Subtitle  string
-	Items     []ItemView
-	SubGroups []GroupView
-
-	OK       int
-	Degraded int
-	Error    int
-	Total    int
-
+// LevelColumn is one drill-down column (miller-column layout): the
+// contents of a single group — its sub-groups as cards and its leaf rows.
+// The root groups live in the fixed sidebar (column 1); every group's
+// column is rendered here, and the browser keeps visible the chain of
+// columns from the selection's root down to it. Column widths divide the
+// frame: each at most a third, quarter with a fourth column, and so on.
+type LevelColumn struct {
+	Path     string
+	Name     string
 	Fraction string
-	Selected bool
+	Cards    []SidebarView
+	Items    []ItemView
+	Selected bool // server-side default: the first root's column
 }
 
 // ItemView is one service row; Kind distinguishes a link ("service") from a
@@ -78,15 +73,6 @@ type SummaryView struct {
 	Alerts int
 }
 
-// CardColumn is the middle column: the sub-groups of one root group as a
-// stack of cards (same shape as the sidebar entries). Only the selected
-// root's column shows at a time; when the selected group has no sub-groups
-// the column collapses away.
-type CardColumn struct {
-	Root  string
-	Cards []SidebarView
-}
-
 type viewData struct {
 	Title     string
 	Summary   SummaryView
@@ -94,12 +80,12 @@ type viewData struct {
 	Styles    []domain.Style
 	StylesCSS template.CSS
 
-	// Sidebar lists the root groups; CardCols stacks the sub-group cards per
-	// root group; Panels carries every group's render (only the selected one
-	// is shown, the browser handles selection).
-	Sidebar  []SidebarView
-	CardCols []CardColumn
-	Panels   []GroupView
+	// Sidebar lists the root groups (column 1); Levels carries every
+	// group's drill-down column in PRE-ORDER (parents before their
+	// children — columns must read left to right along the drill path),
+	// and the browser shows the selection's chain.
+	Sidebar []SidebarView
+	Levels  []*LevelColumn
 
 	DefaultStyle string
 	CanEdit      bool
@@ -190,10 +176,40 @@ func (s *Server) syncHealth(cfg *domain.Config) {
 	s.eng.SetTargets(s.ctx, targets)
 }
 
-// buildView walks the config tree into the two-column layout: the sidebar
-// of root groups (with subtree counts), a renderable panel per group (its
-// direct rows + sub-group tiles, subtree counts, host label from its own
-// direct children), and the masthead stats.
+// leafView projects one child leaf into a row view; the string is its
+// health status class ("" when the leaf carries no status — apps, disabled
+// or absent healthchecks).
+func leafView(mgr *config.Manager, eng *health.Engine, path string, ch domain.Child) (ItemView, string) {
+	leaf := ch.Core()
+	v := ItemView{
+		Key:      domain.ChildPath(path, leaf.Title),
+		Name:     leaf.Title,
+		Subtitle: leaf.Subtitle,
+		URL:      leaf.URL,
+		Icon:     mgr.ResolveIcon(leaf.Icon),
+		Tags:     leaf.Tags,
+		Kind:     "service",
+	}
+	var status string
+	if svc, isService := ch.(*domain.Service); isService {
+		if svc.Health != nil && !svc.Health.Disabled {
+			threshold, err := svc.Health.DegradedD()
+			if err != nil {
+				threshold = domain.DefaultDegradedAfter // validated at load
+			}
+			v.Health = healthView(eng, v.Key, threshold, svc.Private)
+			status = v.Health.Status
+		}
+	} else if app, isApp := ch.(*domain.App); isApp {
+		v.Kind = "app"
+		v.Run = app.Run
+	}
+	return v, status
+}
+
+// buildView walks the config tree into the miller-column layout: the
+// sidebar of root groups (with subtree counts), a drill-down column per
+// group (its sub-group cards + direct leaf rows), and the masthead stats.
 func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styleMgr *styles.Manager) viewData {
 	var data viewData
 	data.Title = cfg.Title
@@ -206,102 +222,72 @@ func buildView(cfg *domain.Config, mgr *config.Manager, eng *health.Engine, styl
 	data.StylesCSS = template.CSS(strings.Join(blocks, "\n"))
 	data.DefaultStyle = resolveDefaultStyle(cfg, data.Styles)
 
-	var visit func(path string, g *domain.Group) GroupView
-	visit = func(path string, g *domain.Group) GroupView {
+	// subtree counts accumulate up the tree
+	type counts struct{ ok, degraded, err, total int }
+	var visit func(path string, g *domain.Group) counts
+	visit = func(path string, g *domain.Group) counts {
 		data.Summary.Hosts++
-		gv := GroupView{
-			Path:     path,
-			Name:     g.Title,
-			Subtitle: g.Subtitle,
-			Total:    len(g.Items),
-		}
+		// pre-order: the column lands in the DOM before its descendants',
+		// so drill-down reads left to right; it is a pointer because the
+		// cards (with subtree counts) are filled in by the recursion below
+		col := &LevelColumn{Path: path, Name: g.Title}
+		data.Levels = append(data.Levels, col)
+		var c counts
+		c.total = len(g.Items)
 		for _, ch := range g.Items {
-			leaf := ch.Core()
-			v := ItemView{
-				Key:      domain.ChildPath(path, leaf.Title),
-				Name:     leaf.Title,
-				Subtitle: leaf.Subtitle,
-				URL:      leaf.URL,
-				Icon:     mgr.ResolveIcon(leaf.Icon),
-				Tags:     leaf.Tags,
-				Kind:     "service",
+			v, status := leafView(mgr, eng, path, ch)
+			switch status {
+			case "up":
+				c.ok++
+			case "degraded":
+				c.degraded++
+				data.Summary.Alerts++
+			case "down":
+				c.err++
+				data.Summary.Alerts++
 			}
-			if svc, isService := ch.(*domain.Service); isService {
-				if svc.Health != nil && !svc.Health.Disabled {
-					threshold, err := svc.Health.DegradedD()
-					if err != nil {
-						threshold = domain.DefaultDegradedAfter // validated at load
-					}
-					v.Health = healthView(eng, v.Key, threshold, svc.Private)
-					switch v.Health.Status {
-					case "up":
-						gv.OK++
-					case "degraded":
-						gv.Degraded++
-						data.Summary.Alerts++
-					case "down":
-						gv.Error++
-						data.Summary.Alerts++
-					}
-				}
-			} else if app, isApp := ch.(*domain.App); isApp {
-				v.Kind = "app"
-				v.Run = app.Run
-			}
-			gv.Items = append(gv.Items, v)
+			col.Items = append(col.Items, v)
 		}
 		for i := range g.Groups {
 			sub := g.Groups[i]
 			subPath := domain.ChildPath(path, sub.Title)
-			// recursion builds the sub-group section AND returns its subtree
-			// counts
-			subTree := visit(subPath, &sub)
-			gv.OK += subTree.OK
-			gv.Error += subTree.Error
-			gv.Total += subTree.Total
-			gv.SubGroups = append(gv.SubGroups, subTree)
+			// recursion builds the sub-group's column AND returns its
+			// subtree counts
+			sc := visit(subPath, &sub)
+			c.ok += sc.ok
+			c.err += sc.err
+			c.total += sc.total
+			col.Cards = append(col.Cards, SidebarView{
+				Path: subPath, Name: sub.Title, OK: sc.ok, Error: sc.err, Total: sc.total,
+			})
 		}
-		gv.Fraction = itoa(gv.OK) + "/" + itoa(gv.Total)
-		// a group holding ONLY sub-groups is a pure container: no composite
-		// panel — the middle column's cards are its entire presentation.
-		// (An empty group — no items, no sub-groups — keeps its panel so it
-		// can show "no services yet".)
-		if len(gv.Items) > 0 || len(gv.SubGroups) == 0 {
-			data.Panels = append(data.Panels, gv)
-		}
-		return gv
+		col.Fraction = itoa(c.ok) + "/" + itoa(c.total)
+		return c
 	}
 
 	for i := range cfg.Groups {
-		gv := visit(cfg.Groups[i].Title, &cfg.Groups[i])
+		c := visit(cfg.Groups[i].Title, &cfg.Groups[i])
+		data.Summary.OK += c.ok
+		data.Summary.Total += c.total
 		// server-side default selection: the first root group; the browser's
 		// remembered pick overrides on load
-		for j := range data.Panels {
-			if data.Panels[j].Path == gv.Path {
-				data.Panels[j].Selected = i == 0
-				break
+		sel := i == 0
+		if sel {
+			for j := range data.Levels {
+				if data.Levels[j].Path == cfg.Groups[i].Title {
+					data.Levels[j].Selected = true
+					break
+				}
 			}
-		}
-		data.Summary.OK += gv.OK
-		data.Summary.Total += gv.Total
-		// middle column: the root's sub-groups as a stack of cards
-		if len(gv.SubGroups) > 0 {
-			col := CardColumn{Root: gv.Path}
-			for _, sub := range gv.SubGroups {
-				col.Cards = append(col.Cards, SidebarView{
-					Path: sub.Path, Name: sub.Name, OK: sub.OK, Error: sub.Error, Total: sub.Total,
-				})
-			}
-			data.CardCols = append(data.CardCols, col)
 		}
 		// sidebar entry per root group
 		data.Sidebar = append(data.Sidebar, SidebarView{
-			Path:     gv.Path,
-			Name:     gv.Name,
-			OK:       gv.OK,
-			Error:    gv.Error,
-			Total:    gv.Total,
-			Selected: i == 0,
+			Path:     cfg.Groups[i].Title,
+			Name:     cfg.Groups[i].Title,
+			OK:       c.ok,
+			Error:    c.err,
+			Total:    c.total,
+			Selected: sel,
 		})
 	}
 	return data

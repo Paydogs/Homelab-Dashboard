@@ -1,12 +1,12 @@
-// Homelab dashboard UI: group selection (left column, nested groups expand
-// as titled sections), search/tag filtering, clock, style picker, editor
-// modals, run items, toasts.
+// Homelab dashboard UI: miller-column group navigation (sidebar + drill-down
+// columns of cards and leaf rows), search/tag filtering, clock, style picker,
+// editor modals, run items, toasts.
 // Plain JS — no framework beyond the vendored Alpine.js for the confirm menus.
 
 (function () {
   "use strict";
 
-  /* ---- group selection: sidebar (root groups) ---- */
+  /* ---- group navigation: sidebar (roots) + drill-down level columns ---- */
 
   var GROUP_KEY = "dashboard.group";
   var sidebar = document.querySelector(".groups");
@@ -19,9 +19,7 @@
     return null;
   }
 
-  // a selection is valid if the group exists anywhere in the tree —
-  // container-only groups (nothing but sub-groups) have no panel, only a
-  // sidebar entry and the middle-column cards
+  // a selection is valid if the group exists anywhere in the tree
   function groupExists(path) {
     if (panelFor(path)) return true;
     var items = document.querySelectorAll(".group-item");
@@ -46,30 +44,48 @@
     return firstItem ? firstItem.dataset.path : null;
   }
 
-  // the middle column: only the selected root's sub-group cards show
-  function showCardsFor(path) {
-    var root = path ? path.split("/")[0] : null;
-    document.querySelectorAll(".group-cards").forEach(function (nav) {
-      nav.classList.toggle("hidden", nav.dataset.root !== root);
+  // a level column is visible when it holds the selection itself or is an
+  // ancestor of it (the chain from the sidebar down to the selection)
+  function isOnChain(levelPath, sel) {
+    return levelPath === sel || sel.indexOf(levelPath + "/") === 0;
+  }
+
+  // miller-column sizing: the sidebar plus one track per visible level
+  // column; tracks are at most a third of the frame wide — a quarter when a
+  // fourth column joins, and so on for deeper nesting
+  function layoutFrame() {
+    var frame = document.querySelector(".frame");
+    if (!frame) return;
+    if (window.innerWidth <= 820) { // the media query stacks instead
+      frame.style.gridTemplateColumns = "";
+      return;
+    }
+    var n = 1; // the sidebar
+    document.querySelectorAll(".group-panel").forEach(function (p) {
+      if (!p.classList.contains("hidden")) n++;
     });
+    var denom = Math.max(3, n);
+    var w = "calc((100% - " + ((denom - 1) * 1.1) + "rem) / " + denom + ")";
+    var cols = [];
+    for (var i = 0; i < n; i++) cols.push(w);
+    frame.style.gridTemplateColumns = cols.join(" ");
   }
 
   function applySelection(path) {
-    // panels carry the SERVER-rendered `hidden` class — toggle the class,
-    // not the hidden property (it can't remove the class)
+    // level columns carry the SERVER-rendered `hidden` class — toggle the
+    // class, not the hidden property (it can't remove the class)
     document.querySelectorAll(".group-panel").forEach(function (p) {
-      p.classList.toggle("hidden", p.dataset.path !== path);
+      p.classList.toggle("hidden", !isOnChain(p.dataset.path, path));
     });
-    // exact match lights the picked card (middle column), …
+    // exact match lights the picked card …
     document.querySelectorAll(".group-item").forEach(function (b) {
       b.classList.toggle("active", b.dataset.path === path);
     });
     // …and the sidebar additionally highlights the ROOT of the selection
     document.querySelectorAll(".groups .group-item").forEach(function (b) {
-      var root = (path.split("/"))[0];
-      b.classList.toggle("active", b.dataset.path === root);
+      b.classList.toggle("active", b.dataset.path === path.split("/")[0]);
     });
-    showCardsFor(path);
+    layoutFrame();
     try { localStorage.setItem(GROUP_KEY, path); } catch (e) { /* */ }
     try { history.replaceState(null, "", "#group=" + encodeURIComponent(path)); } catch (e) { /* */ }
     applyFilters();
@@ -109,37 +125,42 @@
     return true;
   }
 
-  function applyFilters() {
-    if (searchActive()) {
-      // searching covers the whole tree via the ROOT panels (nested groups
-      // expand inside them; the standalone nested panels stay out of the way)
-      document.querySelectorAll(".group-cards").forEach(function (nav) {
-        nav.classList.add("hidden"); // cards are meaningless while searching
-      });
-      // every panel stands alone (rows live in exactly one panel), so a
-      // simple per-panel match count decides visibility
-      document.querySelectorAll(".group-panel").forEach(function (panel) {
-        var matches = 0;
-        panel.querySelectorAll(".row").forEach(function (row) {
-          var show = rowMatches(row);
-          row.classList.toggle("hidden", !show);
-          if (show) matches++;
-        });
-        panel.classList.toggle("hidden", matches === 0);
-      });
-    } else {
-      document.querySelectorAll(".group-panel").forEach(function (panel) {
-        panel.classList.toggle("hidden", panel.dataset.path !== selectedGroup());
-        panel.querySelectorAll(".row.hidden").forEach(function (r) { r.classList.remove("hidden"); });
-      });
-      showCardsFor(selectedGroup());
-    }
+  /* ---- search: the tinted results box over the column layout ----
+     Every matching leaf of the whole tree, server-side filtered
+     (GET /results?q=…&tags=…); rows show only there, the columns stay
+     untouched while searching. Group names never match — leaf rows do. */
+
+  var resultBox = document.getElementById("search-results");
+  var searchTimer = null;
+
+  function resultURL() {
+    var p = "";
+    if (query) p += "q=" + encodeURIComponent(query);
+    activeTags.forEach(function (t) {
+      p += (p ? "&" : "") + "tags=" + encodeURIComponent(t);
+    });
+    return "/results" + (p ? "?" + p : "");
   }
+
+  function refreshResults() {
+    if (!resultBox) return;
+    if (!searchActive()) {
+      resultBox.innerHTML = "";
+      resultBox.classList.add("hidden");
+      return;
+    }
+    resultBox.classList.remove("hidden");
+    if (window.htmx) htmx.ajax("GET", resultURL(), { target: "#search-results", swap: "innerHTML" });
+  }
+
+  // filters drive the results box only
+  function applyFilters() { refreshResults(); }
 
   if (searchInput) {
     searchInput.addEventListener("input", function () {
       query = searchInput.value.trim().toLowerCase();
-      applyFilters();
+      clearTimeout(searchTimer); // a small debounce keeps /results cheap
+      searchTimer = setTimeout(applyFilters, 150);
     });
   }
 
@@ -417,10 +438,10 @@
   function selectGroupInit() {
     var sel = selectedGroup();
     if (sel) {
-      document.querySelectorAll(".group-panel").forEach(function (p) {
-        p.classList.toggle("hidden", p.dataset.path !== sel);
-      });
       applySelection(sel);
+    } else {
+      layoutFrame();
     }
   }
+  window.addEventListener("resize", layoutFrame);
 })();
